@@ -11,13 +11,14 @@
 #include <optional>
 #include <string>
 
-#include "EthernetMAC.h"
 #include "./Error.h"
+#include "EthernetMAC.h"
 #include "ICMPManager.h"
 #include "IPv4Address.h"
 #include "NetworkBuffer.h"
 #include "NetworkOrder.h"
 #include "Protocols.h"
+#include "TCPManager.h"
 #include "UDPManager.h"
 #include "VLBuffer.h"
 
@@ -181,6 +182,7 @@ private:
 
     ICMPManager icmpManager;
     UDPManager udpManager;
+    TCPManager tcpManager;
 };
 
 extern std::unique_ptr<NetworkDevice> the_net_dev;

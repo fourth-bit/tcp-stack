@@ -618,6 +618,8 @@ void NetworkDevice::ResolveIPv4(NetworkBuffer& buffer, EthernetConnection& eth_c
         udpManager.HandleIncoming(std::move(buffer), connection);
         break;
     case IPv4Header::TCP:
+        tcpManager.HandleIncoming(std::move(buffer), connection);
+        break;
     default:
         break;
     }
