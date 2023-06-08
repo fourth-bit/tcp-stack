@@ -1,0 +1,14 @@
+FROM ubuntu:22.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update -y
+RUN apt-get install -y build-essential \
+    g++ \
+    cmake \
+    make \
+    gdb \
+    wget
+
+RUN useradd -m -s /bin/bash builder
+USER builder
