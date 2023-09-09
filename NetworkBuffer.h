@@ -42,6 +42,7 @@ public:
     template <typename T>
     T& As() { return reinterpret_cast<T&>(*this); }
     size_t Size() { return m_view.Size(); }
+    u8* Data() { return m_view.Data(); }
 
 protected:
     VLBufferView m_view;

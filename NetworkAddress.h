@@ -12,6 +12,15 @@
 // Fixme: Use 'using' instead
 class NetworkAddress : public std::variant<IPv4Address/*, IPv6Address*/> {};
 
+inline std::ostream& operator<<(std::ostream& stream, const NetworkAddress& address) {
+    if (std::holds_alternative<IPv4Address>(address)) {
+        stream << std::get<IPv4Address>(address);
+    } else {
+        stream << "Not Implemented for NetworkAddress";
+    }
+    return stream;
+}
+
 struct NetworkAddressHasher {
     size_t operator()(const NetworkAddress& addr) const {
         if (std::holds_alternative<IPv4Address>(addr)) {
