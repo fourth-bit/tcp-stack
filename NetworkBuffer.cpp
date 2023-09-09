@@ -307,6 +307,93 @@ void UDPLayer::ApplyChecksum(IPv4Layer::PsuedoHeader pheader)
     header.checksum = 0;
     header.checksum = RunChecksum(pheader);
 }
+TCPHeader& TCPLayer::GetHeader()
+{
+    return m_view.as<TCPHeader>();
+}
+size_t TCPLayer::GetHeaderSize()
+{
+    auto& header = GetHeader();
+    return header.header_length * 4;
+}
+void TCPLayer::Config::ConfigureLayer(NetworkLayer& layer)
+{
+    auto& tcp = layer.As<TCPLayer>();
+    auto& header = tcp.GetHeader();
+
+    header.source_port = source_port;
+    header.dest_port = dest_port;
+    header.window_size = 0;
+    header.urgent_pointer = 0;
+    header.flags = 0;
+    header.checksum = 0;
+    header.header_length = 5; // Todo: Change when options support is added
+    header.seq_num = 0;
+    header.ack_num = 0;
+}
+
+void TCPLayer::SetSourcePort(u16 port)
+{
+    auto& header = GetHeader();
+    header.source_port = port;
+}
+void TCPLayer::SetDestPort(u16 port)
+{
+    auto& header = GetHeader();
+    header.dest_port = port;
+}
+void TCPLayer::SetAckNum(u32 num)
+{
+    auto& header = GetHeader();
+    header.ack_num = num;
+}
+void TCPLayer::SetSeqNum(u32 num)
+{
+    auto& header = GetHeader();
+    header.seq_num = num;
+}
+void TCPLayer::SetFlags(u16 flags)
+{
+    auto& header = GetHeader();
+    header.flags = flags;
+}
+void TCPLayer::SetWindow(u16 size)
+{
+    auto& header = GetHeader();
+    header.window_size = size;
+}
+u16 TCPLayer::RunChecksum()
+{
+    // Fixme: Change (with UDP) to be IPv4/6 Generic
+    IPv4Layer* ip_layer = m_parent->GetLayer<LayerType::IPv4>();
+
+    auto pheader = ip_layer->BuildPsuedoHeader();
+    u32 csum = IPv4ChecksumAdd(&pheader, sizeof(pheader));
+
+    csum = IPv4ChecksumAdd(m_view.Data(), pheader.length, csum);
+
+    return IPv4ChecksumEnd(csum);
+}
+void TCPLayer::ApplyChecksum()
+{
+    auto& header = GetHeader();
+    header.checksum = 0;
+    header.checksum = RunChecksum();
+}
+u16 TCPLayer::RunChecksum(IPv4Layer::PsuedoHeader pheader)
+{
+    u32 csum = IPv4ChecksumAdd(&pheader, sizeof(pheader));
+    u8* data = m_view.Data();
+    csum = IPv4ChecksumAdd(data, pheader.length, csum);
+
+    return IPv4ChecksumEnd(csum);
+}
+void TCPLayer::ApplyChecksum(IPv4Layer::PsuedoHeader pheader)
+{
+    TCPHeader& header = GetHeader();
+    header.checksum = 0;
+    header.checksum = RunChecksum(pheader);
+}
 NetworkBuffer NetworkBuffer::Copy()
 {
     NetworkBuffer buffer = NetworkBuffer(m_buffer.Copy());

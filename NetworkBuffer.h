@@ -169,6 +169,31 @@ public:
     u16 RunChecksum(IPv4Layer::PsuedoHeader);
     void ApplyChecksum(IPv4Layer::PsuedoHeader);
 };
+class TCPLayer : public NetworkLayer {
+public:
+    struct Config : NetworkLayer::Config {
+        u16 source_port;
+        u16 dest_port;
+
+        size_t LayerSize() override { /* Fixme: Options will change this */ return sizeof(TCPHeader); };
+        // Fixme: Needs Implementation
+        void ConfigureLayer(NetworkLayer&) override;
+    };
+
+    TCPHeader& GetHeader();
+    size_t GetHeaderSize();
+    void SetSourcePort(u16);
+    void SetDestPort(u16);
+    void SetAckNum(u32);
+    void SetSeqNum(u32);
+    void SetFlags(u16);
+    void SetWindow(u16);
+
+    u16 RunChecksum();
+    void ApplyChecksum();
+    u16 RunChecksum(IPv4Layer::PsuedoHeader);
+    void ApplyChecksum(IPv4Layer::PsuedoHeader);
+};
 
 template <LayerType T>
 struct LayerTypeToClass {
@@ -195,7 +220,7 @@ struct LayerTypeToClass<LayerType::IPv6> {
 };
 template <>
 struct LayerTypeToClass<LayerType::TCP> {
-    // using type = ICMPLayer;
+    using type = TCPLayer;
 };
 template <>
 struct LayerTypeToClass<LayerType::UDP> {

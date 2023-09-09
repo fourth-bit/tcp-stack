@@ -128,6 +128,38 @@ struct UDPHeader {
     NetworkOrdered<u16> checksum;
 } __attribute__((packed));
 
+struct TCPHeader {
+    enum Flags {
+        // Sender reduced rate
+        CongestionWindowReduced = 1 << 7,
+        // Sender received congestion notification
+        ECNEcho = 1 << 6,
+        // There is priority data in the thing
+        URG = 1 << 5,
+        ACK = 1 << 4,
+        PSH = 1 << 3,
+        RST = 1 << 2,
+        SYN = 1 << 1,
+        FIN = 1,
+    };
+
+    NetworkOrdered<u16> source_port;
+    NetworkOrdered<u16> dest_port;
+    NetworkOrdered<u32> seq_num;
+    NetworkOrdered<u32> ack_num;
+    u8 _reserved : 4;
+    // Header length in 32 bit words
+    u8 header_length : 4;
+    // See TCPHeader::Flags
+    u8 flags;
+    // The amount of bytes a receiver can accept
+    NetworkOrdered<u16> window_size;
+    NetworkOrdered<u16> checksum;
+    // Where the priority data is in the stream
+    NetworkOrdered<u16> urgent_pointer;
+    u8 options[];
+} __attribute__((packed));
+
 class EthernetBuffer {
 public:
     static constexpr int HEADER_SIZE = sizeof(EthernetHeader);
