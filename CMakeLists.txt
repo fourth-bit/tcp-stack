@@ -16,4 +16,5 @@ add_executable(TCP
         EthernetMAC.cpp
         NetworkStack.cpp
         NetworkBuffer.cpp
-        TCPManager.cpp)
+        TCPManager.cpp
+        CircularBuffer.cpp)

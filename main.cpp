@@ -1064,6 +1064,27 @@ int main()
     std::cout << header.hwtype << std::endl;
 
     auto payload = buffer.GetPayload<ARP_IPv4>();
+#elif 0
+    CircularBuffer buffer { 32 };
+
+    VLBuffer buffer_to_write = VLBuffer::WithSize(18);
+    for (char x = 'a'; x < 'a' + 18; x++) {
+        buffer_to_write[x-'a'] = x;
+    }
+
+    buffer.Write(buffer_to_write.AsView());
+    auto data = buffer.Read(14);
+    data.Hexdump();
+
+    buffer.Write(buffer_to_write.AsView());
+    data = buffer.Read(100);
+    data.Hexdump();
+
+    buffer.Write(buffer_to_write.AsView());
+    buffer.Write(buffer_to_write.AsView().ShrinkEnd(buffer.RemainingSpace()));
+    data = buffer.Read(32);
+    data.Hexdump();
+
 #else
     /*system("rm /dev/net/tap0");
 
