@@ -260,6 +260,7 @@ NetworkDevice::NetworkDevice(EthernetMAC mac_address,
     , m_router(router)
     , icmpManager(this)
     , udpManager(this)
+    , tcpManager(this)
     , MTU(mtu)
     , fragment_timeout([this]() { IPTimeoutFunction(); })
     , m_arp_buffer_config()

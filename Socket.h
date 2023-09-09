@@ -17,8 +17,12 @@
 #include "VLBuffer.h"
 #include "Utils.h"
 #include "./Error.h"
+#include "Modular.h"
+#include "CircularBuffer.h"
 
 class UDPManager;
+class TCPManager;
+struct TCPConnection;
 
 enum class PROTOCOL {
     INTERNET,
@@ -81,6 +85,10 @@ private:
 
 class Socket {
 public:
+    // No copy, no move
+    Socket(const Socket&) = delete;
+    Socket(Socket&&) = delete;
+
     static Socket* Create(PROTOCOL, SOCK_TYPE);
     virtual ~Socket() = default;
 
@@ -94,6 +102,9 @@ public:
     virtual u64 Write(const VLBufferView) = 0;
 
     virtual bool Close() = 0;
+
+protected:
+    Socket() = default;
 };
 
 class UDPSocket : public Socket {
@@ -179,4 +190,101 @@ private:
     // Todo: Cap this, there is a reason for the argument in the listen syscall (DOS Attack)
     std::list<DatagramInfo> m_accept_backlog {};
     UDPSocket* parent { nullptr };
+};
+
+class TCPSocket : public Socket {
+    friend class TCPManager;
+
+    enum class State {
+        CLOSED,
+        LISTEN,
+        SYN_SENT,
+        SYN_RCVD,
+        ESTABLISHED,
+        CLOSE_WAIT,
+        LAST_ACK,
+        FIN_WAIT_1,
+        FIN_WAIT_2,
+        CLOSING,
+        TIME_WAIT,
+    };
+
+    struct TCB {
+        State state;
+
+        // Receive portion of the TCB
+        struct {
+            // Receive Next
+            Modular<u32> NXT { 0 };
+            // Receive Window
+            u16 WND { 0 };
+            // Receive Urgent Pointer
+            u16 UP { 0 };
+            // Initial Receive Sequence Number
+            Modular<u32> IRS { 0 };
+        } RCV;
+
+        // Send portion of the TCB
+        struct {
+            // Send Unacknowledged
+            Modular<u32> UNA { 0 };
+            // Send Next
+            Modular<u32> NXT { 0 };
+            // Send Window
+            u16 WND { 0 };
+            // Send Urgent Pointer
+            u16 UP { 0 };
+            // Segment Sequence Number Used For Last Window Update
+            Modular<u32> WL1 { 0 };
+            // Segment Acknowledgement Number Used For Last Window Update
+            Modular<u32> WL2 { 0 };
+            // Initial Send Sequence Number
+            Modular<u32> ISS { 0 };
+        } SND;
+    };
+
+
+public:
+    TCPSocket(TCPManager*, const NetworkBufferConfig&, Badge<Socket>);
+
+    bool Connect(NetworkAddress, u16) override;
+    bool Bind(u16) override;
+    bool Listen() override;
+
+    ErrorOr<std::pair<Socket*, SocketInfo*>> Accept() override;
+
+    ErrorOr<VLBuffer> Read() override;
+    u64 Write(const VLBufferView) override;
+
+    bool Close() override;
+
+    void HandleIncomingPacket(NetworkBuffer, TCPConnection);
+    void SendTCPPacket(u16 flags, std::optional<VLBuffer> maybe_data, u32 seq_num = 0, u32 ack_num = 0);
+
+    u32 GenerateISS();
+
+    u16 GetPort() const { return m_bound_port; }
+
+private:
+    TCPSocket(TCPManager*, const NetworkBufferConfig&);
+
+    State getState() const { return m_tcb.state; }
+    bool ValidateSequenceNumber(size_t segment_length, Modular<u32>& seq_num);
+
+    TCPManager* m_manager;
+    const NetworkBufferConfig& m_general_config;
+    TCPLayer::Config m_tcp_config;
+
+    NetworkAddress m_connected_addr;
+    u16 m_connected_port { 0 };
+
+    TCB m_tcb;
+
+    u16 m_bound_port { 0 };
+
+    CircularBuffer m_receive_buffer;
+
+    Modular<u32> m_fin_number { 0 };
+    bool m_fin_sent { false };
+    bool m_fin_acked { false };
 };

@@ -133,6 +133,7 @@ public:
 
     ICMPManager& GetICMPManager() { return icmpManager; };
     UDPManager& GetUDPManager() { return udpManager; }
+    TCPManager& GetTCPManager() { return tcpManager; }
 
     EthernetConnection FlipConnection(const EthernetConnection&);
     IPv4Connection FlipConnection(const IPv4Connection&);

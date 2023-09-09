@@ -921,7 +921,7 @@ void runNewCustomClient()
 //        }
 //    }
 
-    auto* sock = dynamic_cast<UDPSocket*>(Socket::Create(PROTOCOL::INTERNET, SOCK_TYPE::DATAGRAM));
+    auto* sock = dynamic_cast<TCPSocket*>(Socket::Create(PROTOCOL::INTERNET, SOCK_TYPE::STREAM));
     sock->Bind(1000);
     sock->Listen();
 
