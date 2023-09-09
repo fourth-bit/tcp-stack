@@ -5,6 +5,7 @@
 #include "NetworkBuffer.h"
 #include "NetworkDevice.h"
 #include <cstring>
+#include <cassert>
 #include <iostream>
 #include <netinet/ip.h>
 #include <unordered_map>
@@ -170,8 +171,8 @@ NetworkLayer* NetworkBuffer::GetLayer(LayerType type)
 }
 void NetworkBuffer::ResizeTop(size_t length)
 {
-    auto top_layer_it = m_layers.end();
-    auto* top_layer = top_layer_it->second.get();
+    auto& top_layer_pair = m_layers.back();
+    auto* top_layer = top_layer_pair.second.get();
 
     m_length -= top_layer->Size();
 
@@ -241,7 +242,7 @@ void IPv4Layer::Config::ConfigureLayer(NetworkLayer& net_layer)
     header.type_of_service = tos;
     header.protocol = proto;
 
-    header.SetFlags(0);
+    header.SetFlags(flags);
     header.SetFragmentOffset(0);
 }
 void ICMPLayer::Config::ConfigureLayer(NetworkLayer&)

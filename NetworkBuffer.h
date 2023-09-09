@@ -104,6 +104,7 @@ public:
         IPv4Address src_ip {};
         IPv4Address dest_ip {};
 
+        u8 flags { 0 };
         u8 tos { 0 };
         u8 ttl { 64 };
         u8 proto { 0 };
