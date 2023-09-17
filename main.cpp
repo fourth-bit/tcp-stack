@@ -923,7 +923,14 @@ void runNewCustomClient()
 
     auto* sock = dynamic_cast<TCPSocket*>(Socket::Create(PROTOCOL::INTERNET, SOCK_TYPE::STREAM));
     sock->Bind(1000);
-    sock->Listen();
+    auto maybe_target = IPv4Address::FromString("172.18.0.3");
+    if (!maybe_target.has_value()) {
+        std::cerr << "IPv4Address not well-formed" << std::endl;
+        return;
+    }
+    sock->Connect(NetworkAddress(maybe_target.value()), 1000);
+    for (;;);
+    // sock->Listen();
 
     for (;;) {
         auto maybe_error = sock->Accept();

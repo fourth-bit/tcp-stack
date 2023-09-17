@@ -338,6 +338,11 @@ TCPSocket::TCPSocket(TCPManager* manager, const NetworkBufferConfig& config)
 
 bool TCPSocket::Connect(NetworkAddress connected_address, u16 connected_port)
 {
+    // This call only makes sense in a not yet open socket
+    if (getState() != State::CLOSED) {
+        return false;
+    }
+
     if (m_bound_port == 0) {
         auto port = m_manager->ReserveEphemeral(this);
         if (!port.has_value()) {
@@ -345,6 +350,7 @@ bool TCPSocket::Connect(NetworkAddress connected_address, u16 connected_port)
         }
 
         m_bound_port = *port;
+        m_tcp_config.source_port = m_bound_port;
     }
 
     bool registered = m_manager->RegisterConnection(this, TCPConnection{ connected_address, connected_port, m_bound_port });
@@ -352,8 +358,17 @@ bool TCPSocket::Connect(NetworkAddress connected_address, u16 connected_port)
         return false;
     }
 
+    // Initialize the TCB
     m_connected_addr = connected_address;
     m_connected_port = connected_port;
+    m_tcp_config.dest_port = connected_port;
+    m_tcb.state = State::SYN_SENT;
+    m_tcb.SND.ISS = GenerateISS();
+    m_tcb.SND.UNA = m_tcb.SND.ISS;
+    m_tcb.SND.NXT = m_tcb.SND.ISS + 1;
+    m_tcb.RCV.WND = m_receive_buffer.RemainingSpace();
+
+    SendTCPPacket(TCPHeader::SYN, {}, m_tcb.SND.ISS.Get(), 0);
 
     return true;
 }
@@ -366,6 +381,7 @@ bool TCPSocket::Bind(u16 port)
     bool res = m_manager->ReservePort(this, port);
     if (res) {
         m_bound_port = port;
+        m_tcp_config.source_port = m_bound_port;
 
         return true;
     }
