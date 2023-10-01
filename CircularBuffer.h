@@ -19,6 +19,7 @@ public:
 
     size_t RemainingSpace() const;
     size_t GetLength() const { return m_length; }
+    bool Empty() const { return m_length == 0; }
 
 private:
     std::unique_ptr<u8[]> m_internal_data;

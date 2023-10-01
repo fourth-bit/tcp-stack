@@ -17,4 +17,5 @@ add_executable(TCP
         NetworkStack.cpp
         NetworkBuffer.cpp
         TCPManager.cpp
-        CircularBuffer.cpp)
+        CircularBuffer.cpp
+        FIFOLock.cpp)
