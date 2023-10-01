@@ -929,7 +929,15 @@ void runNewCustomClient()
         return;
     }
     sock->Connect(NetworkAddress(maybe_target.value()), 1000);
-    for (;;);
+    for (;;) {
+        auto maybe_buffer = sock->Read();
+        if (maybe_buffer.IsError()) {
+            std::cout << "Error in Read " << maybe_buffer.GetError()->ToString() << std::endl;
+            continue;
+        }
+
+        maybe_buffer.GetResult().Hexdump();
+    }
     // sock->Listen();
 
     for (;;) {

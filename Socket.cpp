@@ -439,7 +439,26 @@ ErrorOr<std::pair<Socket*, SocketInfo*>> TCPSocket::Accept()
 }
 ErrorOr<VLBuffer> TCPSocket::Read()
 {
-    assert(false);
+    if (m_tcb.state == State::CLOSED) {
+        return SocketError::Make(SocketError::Code::ReadFromClosedSocket);
+    } else if (m_tcb.state == State::LISTEN) {
+        return SocketError::Make(SocketError::Code::ReadFromConnectionSocket);
+    }
+
+    // Grab the lock first for proper queueing
+    std::unique_lock lock1 (m_read_queue);
+
+    // Now only the Read method and HandleIncoming can get their hands on this lock
+    std::unique_lock lock2 (m_read_buffer_lock);
+
+    m_read_cv.wait(lock2, [this]() {
+        return current_read_size != 0;
+    });
+
+    auto ret = m_receive_buffer.Read(current_read_size);
+    current_read_size = 0;
+
+    return ret;
 }
 u64 TCPSocket::Write(const VLBufferView)
 {
@@ -806,9 +825,11 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
                 //      been signaled that there is urgent data, then do not notify them again
             }
 
-            // Seventh, process the segment text
+            // Seventh, process the segment text. FIXME: zero window probes
             if (segment_length != 0) {
-                // FIXME: Thread safety
+                // Acquire the lock for the read buffer to stop any possible data races
+                std::unique_lock rb_lock (m_read_buffer_lock);
+
                 if (m_receive_buffer.Write(buffer.GetPayload())) {
                     m_tcb.RCV.NXT += segment_length;
                     m_tcb.RCV.WND = m_receive_buffer.RemainingSpace();
@@ -817,10 +838,11 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
                     SendTCPPacket(ACK, {}, m_tcb.SND.NXT.Get(), m_tcb.RCV.NXT.Get());
 
                     if (header.flags & PSH) {
-                        // TODO: The push flag means that it is now OK to send this data to the user
-                        std::cout << "Pushing Data To Socket: " << std::endl;
-                        auto read_buffer = m_receive_buffer.Read(m_receive_buffer.GetLength() - m_receive_buffer.RemainingSpace());
-                        read_buffer.Hexdump();
+                        // Update the current_read_size
+                        current_read_size = m_receive_buffer.GetLength();
+
+                        // Allow a waiting thread to read
+                        m_read_cv.notify_one();
                     }
                 }
             }

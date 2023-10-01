@@ -19,6 +19,7 @@
 #include "./Error.h"
 #include "Modular.h"
 #include "CircularBuffer.h"
+#include "FIFOLock.h"
 
 class UDPManager;
 class TCPManager;
@@ -285,9 +286,14 @@ private:
 
     u16 m_bound_port { 0 };
 
+    std::mutex m_read_buffer_lock;
     CircularBuffer m_receive_buffer;
+    size_t current_read_size { 0 };
+    std::condition_variable m_read_cv;
 
     Modular<u32> m_fin_number { 0 };
     bool m_fin_sent { false };
     bool m_fin_acked { false };
+
+    FIFOLock m_read_queue;
 };
