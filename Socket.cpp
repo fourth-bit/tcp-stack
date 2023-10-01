@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <iostream>
+#include <sstream>
 
 #include "NetworkDevice.h"
 #include "Socket.h"
@@ -78,6 +79,38 @@ static std::optional<Route> MakeRoutingDecision(IPv4Address to)
     }
 
     return { Route { *result, to, } };
+}
+
+std::string SocketError::ToString()
+{
+    std::stringstream ss;
+
+    switch (code) {
+    case Code::SimultaneousRead:
+        ss << "Attempt to Simultaneously Read to Socket";
+        break;
+    case Code::ReadFromConnectionSocket:
+        ss << "Attempt to Read to a Socket Designated for Listening";
+        break;
+    case Code::ReadFromClosedSocket:
+        ss << "Attempt to read from Closed Socket";
+        break;
+    case Code::WriteToConnectionSocket:
+        ss << "Attempt to read to a Socket Designated for Listening";
+        break;
+    case Code::SimultaneousAccept:
+        ss << "Attempt to Call Accept Simultaneously on Socket";
+        break;
+    case Code::AcceptOnNonListeningSocket:
+        ss << "Attempt to Accept New Connections on a Socket Not in Listen State";
+        break;
+    }
+
+    if (!information.empty()) {
+        ss << ": " << information;
+    }
+
+    return ss.str();
 }
 
 UDPSocket::UDPSocket(UDPManager* manager, const NetworkBufferConfig& config, Badge<Socket>)

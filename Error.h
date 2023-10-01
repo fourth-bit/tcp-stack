@@ -12,6 +12,8 @@
 class Error {
 public:
     virtual ~Error() = default;
+
+    virtual std::string ToString() = 0;
 };
 
 template<typename T>

@@ -61,6 +61,7 @@ public:
     enum class Code {
         SimultaneousRead,
         ReadFromConnectionSocket,
+        ReadFromClosedSocket,
         WriteToConnectionSocket,
         SimultaneousAccept,
         AcceptOnNonListeningSocket,
@@ -71,6 +72,8 @@ public:
     {
         return std::unique_ptr<Error>(new SocketError(code, std::move(information)));
     }
+
+    std::string ToString() override;
 
     Code code;
     std::string information;
