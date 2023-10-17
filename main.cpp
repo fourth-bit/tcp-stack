@@ -22,6 +22,7 @@
 
 #include "NetworkDevice.h"
 #include "NetworkOrder.h"
+#include "TimerManager.h"
 
 std::unique_ptr<NetworkDevice> the_net_dev;
 
@@ -1099,6 +1100,23 @@ int main()
     buffer.Write(buffer_to_write.AsView().ShrinkEnd(buffer.RemainingSpace()));
     data = buffer.Read(32);
     data.Hexdump();
+
+#elif 1
+    using namespace std::chrono_literals;
+
+    TimerManager manager;
+
+    manager.AddTimer(20ms, [](){
+        std::cout << "Timer 1 Fired" << std::endl;
+    });
+    manager.AddTimer(200ms, [](){
+        std::cout << "Timer 2 Fired" << std::endl;
+    });
+    manager.AddTimer(2ms, [](){
+        std::cout << "Timer 3 Fired" << std::endl;
+    });
+
+    std::this_thread::sleep_for(1s);
 
 #else
     /*system("rm /dev/net/tap0");
