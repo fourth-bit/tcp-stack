@@ -18,8 +18,9 @@ public:
     VLBuffer Read(size_t byte_count);
 
     size_t RemainingSpace() const;
-    size_t GetLength() const { return m_length; }
-    bool Empty() const { return m_length == 0; }
+    size_t GetUsedLength() const { return m_length - RemainingSpace(); }
+    size_t GetTotalLength() const { return m_length; }
+    bool Empty() const { return m_write_offset == m_read_offset && !m_fully_used; }
 
 private:
     std::unique_ptr<u8[]> m_internal_data;
