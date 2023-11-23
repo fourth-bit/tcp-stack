@@ -924,7 +924,7 @@ void runNewCustomClient()
 
     auto* sock = dynamic_cast<TCPSocket*>(Socket::Create(PROTOCOL::INTERNET, SOCK_TYPE::STREAM));
     sock->Bind(1000);
-    auto maybe_target = IPv4Address::FromString("172.18.0.3");
+    auto maybe_target = IPv4Address::FromString("172.18.0.2");
     if (!maybe_target.has_value()) {
         std::cerr << "IPv4Address not well-formed" << std::endl;
         return;
@@ -938,6 +938,10 @@ void runNewCustomClient()
         }
 
         maybe_buffer.GetResult().Hexdump();
+
+        auto buffer = std::move(maybe_buffer.GetResult());
+
+        sock->Write(buffer.AsView());
     }
     // sock->Listen();
 
@@ -1101,7 +1105,7 @@ int main()
     data = buffer.Read(32);
     data.Hexdump();
 
-#elif 1
+#elif 0
     using namespace std::chrono_literals;
 
     TimerManager manager;

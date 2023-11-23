@@ -51,7 +51,7 @@ Socket* Socket::Create(PROTOCOL proto, SOCK_TYPE type)
     }
 
     if (type == SOCK_TYPE::STREAM) {
-        return new TCPSocket(&the_net_dev->GetTCPManager(), *config, {});
+        return new TCPSocket(&the_net_dev->GetTCPManager(), *config, proto, {});
     } else if (type == SOCK_TYPE::DATAGRAM) {
         return new UDPSocket(&the_net_dev->GetUDPManager(), *config, {});
     } else if (type == SOCK_TYPE::RAW) {
@@ -357,19 +357,26 @@ bool UDPSocket::UnregisterSubsocket(UDPSocket* socket)
     return false;
 }
 
-TCPSocket::TCPSocket(TCPManager* manager, const NetworkBufferConfig& config, Badge<Socket>)
-    : m_manager(manager)
-    , m_general_config(config)
-    , m_tcb { .state=State::CLOSED }
-    , m_receive_buffer(65535)
+TCPSocket::TCPSocket(TCPManager* manager, const NetworkBufferConfig& config, PROTOCOL proto, Badge<Socket>)
+    : TCPSocket(manager, config, proto)
 {
 }
-TCPSocket::TCPSocket(TCPManager* manager, const NetworkBufferConfig& config)
+TCPSocket::TCPSocket(TCPManager* manager, const NetworkBufferConfig& config, PROTOCOL proto)
     : m_manager(manager)
     , m_general_config(config)
-    , m_tcb { .state=State::CLOSED }
+    , m_tcb { .state = State::CLOSED }
     , m_receive_buffer(65535)
+    , m_write_buffer(65535)
+    , m_proto(proto)
 {
+    switch (m_proto) {
+    case PROTOCOL::INTERNET:
+        MSS = 536;
+        break;
+    case PROTOCOL::INTERNET6:
+        MSS = 1220;
+        break;
+    }
 }
 
 bool TCPSocket::Connect(NetworkAddress connected_address, u16 connected_port)
@@ -438,7 +445,8 @@ bool TCPSocket::Listen()
 }
 ErrorOr<std::pair<Socket*, SocketInfo*>> TCPSocket::Accept()
 {
-    for (;;);
+    for (;;)
+        ;
 }
 ErrorOr<VLBuffer> TCPSocket::Read()
 {
@@ -463,11 +471,82 @@ ErrorOr<VLBuffer> TCPSocket::Read()
 
     return ret;
 }
-u64 TCPSocket::Write(const VLBufferView)
+u64 TCPSocket::Write(VLBufferView data)
 {
-    assert(false);
-    return 0;
+    /* Write is the public interface to writing data to the socket. All this function
+     * is responsible for is to put data in the write_buffer, and if we can't block
+     * until we can.
+     */
+
+    if (data.Size() == 0) {
+        return 0;
+    }
+
+    /* How do we want the data to actually send?
+     *  1: When is it proper to send data?
+     *      We can send data if a full sized segment fits in the window (and we
+     *      have enough data to fill a full sized segment), or wait until all
+     *      UNACKED packets have been ACKED. Otherwise, block and queue the data
+     *  2: Whose responsibility is it to make a packet?
+     *      The crux of the question is when we have multiple packets in the queue,
+     *      who has to call SendTCPPacket? The idea is that we can call SendTCPPacket
+     *      piggybacked with an ACK for when the unacked data clears. This logic is theory
+     *      happens in and around the HandleIncoming logic, the exact method is TBD, and likely
+     *      has something to do with delayed ACKs.
+     */
+
+    size_t data_written = 0;
+
+    {
+        std::scoped_lock lock(m_write_lock);
+
+        // In this case, we can bypass the write buffer
+        if (m_tcb.SND.UNA == m_tcb.SND.NXT && m_write_buffer.GetUsedLength() == 0 && getUsableWindow() >= MSS) {
+            // Send an MSS sized segment
+            size_t write_size = std::min(data.Size(), MSS);
+
+            WriteImpl_nolock(data.ShrinkEnd(write_size).CopyToVLBuffer());
+            data = data.SubBuffer(write_size);
+            data_written += write_size;
+        }
+
+        if (data.Size() > 0) {
+            // We need to buffer the data if it can't be written immediately
+            size_t buffer_write_size = std::min(m_write_buffer.RemainingSpace(), data.Size());
+            data_written += buffer_write_size;
+            if (data_written == 0) {
+                // TODO: Block until there is space ...
+                return -1;
+            }
+
+            m_write_buffer.Write(data.ShrinkEnd(buffer_write_size));
+
+            DrainWriteBuffer_nolock();
+        }
+    }
+
+    return data_written;
 }
+
+void TCPSocket::WriteImpl_nolock(VLBuffer data)
+{
+    SendTCPPacket(TCPHeader::PSH | TCPHeader::ACK, data.Copy(), m_tcb.SND.NXT.Get(), m_tcb.RCV.NXT.Get());
+    m_tcb.SND.NXT += data.Size();
+    m_unacked_packets.emplace(std::move(data), m_tcb.SND.NXT);
+}
+
+void TCPSocket::DrainWriteBuffer_nolock()
+{
+    if (m_tcb.SND.UNA == m_tcb.SND.NXT && getUsableWindow() >= m_write_buffer.GetUsedLength() && m_write_buffer.GetUsedLength() <= MSS) {
+        // Send a packet with <= MSS size if and only if no unacked data and there is window space
+        WriteImpl_nolock(m_write_buffer.Read(m_write_buffer.GetUsedLength()));
+    }
+
+    while (m_write_buffer.GetUsedLength() >= MSS && getUsableWindow() >= MSS) {
+        WriteImpl_nolock(m_write_buffer.Read(MSS));
+    }
+}
+
 bool TCPSocket::Close()
 {
     assert(false);
@@ -587,7 +666,7 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
             //       segment does not exactly match the security/compartment in the TCB, then send a reset
             //       and return.
 
-            auto* new_socket = new TCPSocket(m_manager, m_general_config);
+            auto* new_socket = new TCPSocket(m_manager, m_general_config, m_proto);
 
             m_manager->AlertOpenConnection(this, new_socket, connection);
 
@@ -910,8 +989,9 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
                     SendTCPPacket(ACK, {}, m_tcb.SND.NXT.Get(), m_tcb.RCV.NXT.Get());
 
                     if (header.flags & PSH) {
+                        // FIXME: THIS BEHAVIOR IS WRONG
                         // Update the current_read_size
-                        current_read_size = m_receive_buffer.GetLength();
+                        current_read_size = m_receive_buffer.GetUsedLength();
 
                         // Allow a waiting thread to read
                         m_read_cv.notify_one();
@@ -946,6 +1026,13 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
             default:
                 // In all other cases, do nothing
                 break;
+            }
+
+            std::scoped_lock write_lock (m_write_lock);
+
+            if (m_tcb.SND.UNA == m_tcb.SND.NXT && m_write_buffer.GetUsedLength() != 0) {
+                size_t write_size = std::min(std::min(m_write_buffer.GetUsedLength(), getUsableWindow()), MSS);
+                WriteImpl_nolock(m_write_buffer.Read(write_size));
             }
         }
 

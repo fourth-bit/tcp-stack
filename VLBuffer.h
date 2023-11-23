@@ -25,7 +25,7 @@ public:
     VLBufferView ShrinkEnd(size_t end_index)
     {
         if (end_index >= m_length) {
-            // TOdo: Error
+            // Todo: Error
         }
 
         return { m_data, 0, end_index };

@@ -248,9 +248,14 @@ class TCPSocket : public Socket {
         } SND;
     };
 
+    struct UnackedPacket {
+        VLBuffer data;
+        Modular<u32> seq_num;
+    };
+
 
 public:
-    TCPSocket(TCPManager*, const NetworkBufferConfig&, Badge<Socket>);
+    TCPSocket(TCPManager*, const NetworkBufferConfig&, PROTOCOL proto, Badge<Socket>);
 
     bool Connect(NetworkAddress, u16) override;
     bool Bind(u16) override;
@@ -271,12 +276,17 @@ public:
     u16 GetPort() const { return m_bound_port; }
 
 private:
-    TCPSocket(TCPManager*, const NetworkBufferConfig&);
+    TCPSocket(TCPManager*, const NetworkBufferConfig&, PROTOCOL proto);
 
     State getState() const { return m_tcb.state; }
     bool ValidateSequenceNumber(size_t segment_length, Modular<u32>& seq_num);
 
+    size_t getUsableWindow() { return (m_tcb.SND.UNA + m_tcb.SND.WND - m_tcb.SND.NXT).Get(); }
+    void WriteImpl_nolock(VLBuffer);
+    void DrainWriteBuffer_nolock();
+
     TCPManager* m_manager;
+    PROTOCOL m_proto;
     const NetworkBufferConfig& m_general_config;
     TCPLayer::Config m_tcp_config;
 
@@ -298,4 +308,12 @@ private:
     bool m_fin_acked { false };
 
     FIFOLock m_read_queue;
+
+    std::queue<UnackedPacket> m_unacked_packets;
+    // FIXME: Round-Trip-Time Measurement (RFC 6298)
+    std::chrono::milliseconds m_retransmission_timeout { 1000 };
+
+    // Locks everything related to writing data: retransmission queue, nagle queue, etc.
+    std::mutex m_write_lock;
+    CircularBuffer m_write_buffer;
 };
