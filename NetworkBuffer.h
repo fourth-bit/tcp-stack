@@ -175,7 +175,13 @@ public:
         u16 source_port;
         u16 dest_port;
 
-        size_t LayerSize() override { /* Fixme: Options will change this */ return sizeof(TCPHeader); };
+        std::optional<u16> MSS_option;
+
+        // Returns options length IN BYTES
+        size_t options_length();
+
+        size_t LayerSize() override { return sizeof(TCPHeader) + options_length(); };
+
         // Fixme: Needs Implementation
         void ConfigureLayer(NetworkLayer&) override;
     };
