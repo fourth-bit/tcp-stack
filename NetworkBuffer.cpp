@@ -327,9 +327,38 @@ void TCPLayer::Config::ConfigureLayer(NetworkLayer& layer)
     header.urgent_pointer = 0;
     header.flags = 0;
     header.checksum = 0;
-    header.header_length = 5; // Todo: Change when options support is added
+    header.header_length = 5 + options_length() / 4;
     header.seq_num = 0;
     header.ack_num = 0;
+
+    size_t options_offset = 0;
+    if (MSS_option.has_value()) {
+        header.options[options_offset + 0] = 2;
+        header.options[options_offset + 1] = 4;
+
+        NetworkOrdered nw_mss = MSS_option.value();
+        *(u16*)(header.options + options_offset + 2) = nw_mss.WithNetworkOrder();
+
+        options_offset += 4;
+    }
+
+    if (options_offset % 4 != 0) {
+        // Add an end of options list option
+        header.options[options_offset] = 0;
+    }
+}
+size_t TCPLayer::Config::options_length()
+{
+    size_t options_size = 0;
+    if (MSS_option.has_value()) {
+        options_size += 4;
+    }
+
+    if (options_size % 4 != 0) {
+        options_size += 4 - options_size % 4;
+    }
+
+    return options_size;
 }
 
 void TCPLayer::SetSourcePort(u16 port)
