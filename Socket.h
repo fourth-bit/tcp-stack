@@ -4,22 +4,23 @@
 
 #pragma once
 
-#include <list>
-#include <mutex>
-#include <memory>
-#include <optional>
 #include <condition_variable>
+#include <list>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <queue>
 
-#include "IPv4Address.h"
-#include "IntDefs.h"
-#include "NetworkBuffer.h"
-#include "NetworkAddress.h"
-#include "VLBuffer.h"
-#include "Utils.h"
 #include "./Error.h"
-#include "Modular.h"
 #include "CircularBuffer.h"
 #include "FIFOLock.h"
+#include "IPv4Address.h"
+#include "IntDefs.h"
+#include "Modular.h"
+#include "NetworkAddress.h"
+#include "NetworkBuffer.h"
+#include "Utils.h"
+#include "VLBuffer.h"
 
 class UDPManager;
 class TCPManager;
@@ -283,6 +284,7 @@ private:
     u16 m_connected_port { 0 };
 
     TCB m_tcb;
+    size_t MSS;
 
     u16 m_bound_port { 0 };
 

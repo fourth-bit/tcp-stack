@@ -6,10 +6,10 @@
 #include <iostream>
 #include <sstream>
 
+#include "Badge.h"
 #include "NetworkDevice.h"
 #include "Socket.h"
 #include "UDPManager.h"
-#include "Badge.h"
 
 struct Route {
     EthernetMAC targetMAC;
@@ -18,7 +18,7 @@ struct Route {
 
 u8 socktype_to_ipproto(SOCK_TYPE type)
 {
-    switch(type) {
+    switch (type) {
     case SOCK_TYPE::STREAM:
         return IPPROTO_TCP;
     case SOCK_TYPE::DATAGRAM:
@@ -78,7 +78,10 @@ static std::optional<Route> MakeRoutingDecision(IPv4Address to)
         return {};
     }
 
-    return { Route { *result, to, } };
+    return { Route {
+        *result,
+        to,
+    } };
 }
 
 std::string SocketError::ToString()
@@ -169,7 +172,7 @@ ErrorOr<VLBuffer> UDPSocket::Read()
         return SocketError::Make(SocketError::Code::ReadFromConnectionSocket);
     }
 
-    std::unique_lock lock (read_lock);
+    std::unique_lock lock(read_lock);
     if (in_read) {
         // Disallow simultaneous reads
         return SocketError::Make(SocketError::Code::SimultaneousRead);
@@ -191,7 +194,7 @@ ErrorOr<VLBuffer> UDPSocket::Read()
 
 ErrorOr<UDPSocket::DatagramInfo> UDPSocket::ReadFrom()
 {
-    std::unique_lock lock (read_lock);
+    std::unique_lock lock(read_lock);
     if (in_read) {
         // Disallow simultaneous reads
         return SocketError::Make(SocketError::Code::SimultaneousRead);
@@ -310,7 +313,7 @@ ErrorOr<std::pair<Socket*, SocketInfo*>> UDPSocket::Accept()
         return SocketError::Make(SocketError::Code::AcceptOnNonListeningSocket);
     }
 
-    std::unique_lock lock (accept_lock);
+    std::unique_lock lock(accept_lock);
     if (in_accept) {
         // Disallow Simultaneous Accepts
         return SocketError::Make(SocketError::Code::SimultaneousAccept);
@@ -331,7 +334,7 @@ ErrorOr<std::pair<Socket*, SocketInfo*>> UDPSocket::Accept()
     socket->m_bound_port = m_bound_port;
     socket->m_udp_config = m_udp_config;
 
-    m_listening_subsockets[UDPSockInfo{in_addr, in_port}] = socket;
+    m_listening_subsockets[UDPSockInfo { in_addr, in_port }] = socket;
     socket->AppendReadPayload(buffer.AsView(), in_addr, in_port);
 
     auto* info = new PortSocketInfo { in_addr, in_port };
@@ -386,7 +389,7 @@ bool TCPSocket::Connect(NetworkAddress connected_address, u16 connected_port)
         m_tcp_config.source_port = m_bound_port;
     }
 
-    bool registered = m_manager->RegisterConnection(this, TCPConnection{ connected_address, connected_port, m_bound_port });
+    bool registered = m_manager->RegisterConnection(this, TCPConnection { connected_address, connected_port, m_bound_port });
     if (!registered) {
         return false;
     }
@@ -446,10 +449,10 @@ ErrorOr<VLBuffer> TCPSocket::Read()
     }
 
     // Grab the lock first for proper queueing
-    std::unique_lock lock1 (m_read_queue);
+    std::unique_lock lock1(m_read_queue);
 
     // Now only the Read method and HandleIncoming can get their hands on this lock
-    std::unique_lock lock2 (m_read_buffer_lock);
+    std::unique_lock lock2(m_read_buffer_lock);
 
     m_read_cv.wait(lock2, [this]() {
         return current_read_size != 0;
@@ -487,6 +490,63 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
     size_t segment_length = buffer.GetPayload().Size();
     Modular<u32> seq_num = header.seq_num.Convert();
     Modular<u32> ack_num = header.ack_num.Convert();
+
+    // Parse Options
+    if (header.header_length * 4 > sizeof(TCPHeader)) {
+        // Then, there are options
+        size_t options_length = header.header_length * 4 - sizeof(TCPHeader);
+        size_t i = 0;
+        while (i < options_length) {
+            // Parse the options kind
+            u8 kind = header.options[i];
+
+            bool is_end = false;
+
+            switch (kind) {
+            case 0:
+                // End-Of-Options List
+                is_end = true;
+                break;
+            case 1:
+                // No-Op
+                i++;
+                break;
+            case 2: {
+                // Maximum-Segment Size Option
+                // Next octet is length
+
+                u8 option_length = header.options[i + 1];
+                if (option_length != 4) {
+                    // FIXME: What should we do? Send a RST? Ignore it?
+                    break;
+                }
+
+                // Pointer Crimes to parse this as a network ordered u16, don't let the MSS increase either
+                MSS = std::min((size_t)NetworkOrdered(*(u16*)(header.options + (i + 2))).Convert(), MSS);
+
+                i += option_length;
+                break;
+            }
+            default: {
+                // Read the length octet
+                u8 option_length = header.options[i + 1];
+
+                // Ignore the data
+                i += option_length;
+
+                if (option_length == 0) {
+                    // Fixme: What do we do here? Otherwise we would loop forever. Send a RST maybe?
+                    is_end = true;
+                    break;
+                }
+            }
+            }
+
+            if (is_end) {
+                break;
+            }
+        }
+    }
 
     // RFC 9293 Section 3.10.7 Segment Arrives
     switch (m_tcb.state) {
@@ -737,8 +797,7 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
 
         // Second, check the reset bit
         if (header.flags & RST) {
-            if (getState() == State::ESTABLISHED || getState() == State::FIN_WAIT_1 ||
-                getState() == State::FIN_WAIT_2 || getState() == State::CLOSE_WAIT) {
+            if (getState() == State::ESTABLISHED || getState() == State::FIN_WAIT_1 || getState() == State::FIN_WAIT_2 || getState() == State::CLOSE_WAIT) {
                 // TODO: Send a reset signal to any outstanding read or write calls
             }
 
@@ -762,14 +821,27 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
 
         // Fifth, check the ACK bit
         if (header.flags & ACK) {
-            if (ack_num.InRange(m_tcb.SND.UNA, m_tcb.SND.NXT, LowerOpen{})) {
-                // Todo: Remove any segments on the retransmission queue that are therefore ACKed
-                // Todo: In addition alert the appropriate write calls that their data has been sent
+            if (ack_num.InRange(m_tcb.SND.UNA, m_tcb.SND.NXT, LowerOpen {})) {
+                std::scoped_lock lock (m_write_lock);
+
+                while (!m_unacked_packets.empty()) {
+                    auto awaiting_ack = m_unacked_packets.front().seq_num;
+
+                    if (awaiting_ack.InRange(m_tcb.SND.UNA, ack_num, Closed {})) {
+                        m_unacked_packets.pop();
+                    } else {
+                        break;
+                    }
+                }
 
                 m_tcb.SND.UNA = ack_num;
 
+                if (m_tcb.SND.UNA == m_tcb.SND.NXT && m_write_buffer.GetUsedLength() != 0) {
+                    DrainWriteBuffer_nolock();
+                }
+
                 // Check if our fin is ACKED, only for states in the close sequence
-                if (m_fin_sent && ack_num.InRange(m_fin_number, m_tcb.SND.NXT, LowerOpen{})) {
+                if (m_fin_sent && ack_num.InRange(m_fin_number, m_tcb.SND.NXT, LowerOpen {})) {
                     if (getState() == State::FIN_WAIT_1) {
                         m_tcb.state = State::FIN_WAIT_2;
                     } else if (getState() == State::CLOSING) {
@@ -790,7 +862,7 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
                 break;
             }
 
-            if (ack_num.InRange(m_tcb.SND.UNA, m_tcb.SND.NXT, Closed{})) {
+            if (ack_num.InRange(m_tcb.SND.UNA, m_tcb.SND.NXT, Closed {})) {
                 // Then we should update the send window
                 if (m_tcb.SND.WL1.UnsafeLT(seq_num) || (m_tcb.SND.WL1 == seq_num && m_tcb.SND.WL2.UnsafeLE(ack_num))) {
                     m_tcb.SND.WL1 = seq_num;
@@ -828,7 +900,7 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
             // Seventh, process the segment text. FIXME: zero window probes
             if (segment_length != 0) {
                 // Acquire the lock for the read buffer to stop any possible data races
-                std::unique_lock rb_lock (m_read_buffer_lock);
+                std::unique_lock rb_lock(m_read_buffer_lock);
 
                 if (m_receive_buffer.Write(buffer.GetPayload())) {
                     m_tcb.RCV.NXT += segment_length;
@@ -905,6 +977,14 @@ void TCPSocket::SendTCPPacket(u16 flags, std::optional<VLBuffer> maybe_data, u32
     if (maybe_data.has_value()) {
         maybe_data_size = maybe_data->Size();
     }
+
+    TCPLayer::Config config = m_tcp_config;
+
+    // Send an MSS option on all SYN Segments
+    if (flags & SYN) {
+        config.MSS_option = MSS;
+    }
+
     NetworkBuffer buffer = m_general_config.BuildBuffer(m_tcp_config.LayerSize() + maybe_data_size);
     auto& tcp = buffer.AddLayer<LayerType::TCP>(m_tcp_config.LayerSize());
     m_tcp_config.ConfigureLayer(tcp);
