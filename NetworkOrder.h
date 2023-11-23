@@ -87,6 +87,8 @@ public:
 
     T Convert() const { return network_to_host(m_value); };
 
+    T WithNetworkOrder() const { return m_value; }
+
 private:
     T m_value;
 } __attribute__((packed));
