@@ -118,8 +118,7 @@ bool TimerManager::RemoveTimer(int fd)
 
 void TimerManager::Workfn()
 {
-    while (!ready)
-        ;
+    while (!ready) continue;
 
     while (true) {
         epoll_event ev;

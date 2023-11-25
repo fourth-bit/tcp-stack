@@ -462,8 +462,7 @@ bool TCPSocket::Listen()
 }
 ErrorOr<std::pair<Socket*, SocketInfo*>> TCPSocket::Accept()
 {
-    for (;;)
-        ;
+    for (;;) continue;
 }
 ErrorOr<VLBuffer> TCPSocket::Read()
 {

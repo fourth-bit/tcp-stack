@@ -1,0 +1,5 @@
+# Generated from CLion C/C++ Code Style settings
+BasedOnStyle: WebKit
+
+AllowShortLoopsOnASingleLine: true
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse

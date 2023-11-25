@@ -32,7 +32,6 @@ class NetworkLayer {
 
 public:
     virtual ~NetworkLayer() = default;
-    ;
 
     struct Config {
         virtual ~Config() = default;
