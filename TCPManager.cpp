@@ -18,6 +18,13 @@ void TCPManager::HandleIncoming(NetworkBuffer buffer, IPv4Connection ip_connecti
     auto header = tcp.GetHeader();
     buffer.ResizeTop(header.header_length * 4);
 
+    if (header.header_length < 5) {
+#ifdef DEBUG_TCP
+        std::cout << "Malformed Packet: header_length < 5. Dropping" << std::endl;
+#endif
+        return;
+    }
+
     if (tcp.RunChecksum() != 0) {
 #ifdef DEBUG_TCP
         std::cout << "Bad checksum in TCP Packet. Dropping." << std::endl;
