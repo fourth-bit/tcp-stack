@@ -4,8 +4,8 @@
 
 #pragma once
 
-#include "NetworkOrder.h"
 #include "NetworkDevice.h"
+#include "NetworkOrder.h"
 
 struct tcp_header {
     enum connection_flags {
@@ -42,6 +42,7 @@ struct tcp_header {
 class TCPSegment {
 public:
     static TCPSegment FromHeader(tcp_header* from_header);
+
 private:
 };
 

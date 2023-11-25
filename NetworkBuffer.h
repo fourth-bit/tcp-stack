@@ -29,8 +29,10 @@ class NetworkBuffer;
 
 class NetworkLayer {
     friend class NetworkBuffer;
+
 public:
-    virtual ~NetworkLayer() = default;;
+    virtual ~NetworkLayer() = default;
+    ;
 
     struct Config {
         virtual ~Config() = default;
@@ -96,7 +98,6 @@ public:
     inline static const std::unordered_map<arp_proto, u8> pro_size_map {
         { arp_proto::IPv4, 4 }
     };
-
 };
 class IPv4Layer : public NetworkLayer {
 public:
@@ -109,7 +110,10 @@ public:
         u8 ttl { 64 };
         u8 proto { 0 };
 
-        size_t LayerSize() override { /* Fixme: As we add the possibility to have options change this  */ return 20; }
+        size_t LayerSize() override
+        { /* Fixme: As we add the possibility to have options change this  */
+            return 20;
+        }
         void ConfigureLayer(NetworkLayer&) override;
     };
 
@@ -296,15 +300,15 @@ class NetworkBuffer {
 public:
     explicit NetworkBuffer(VLBuffer&&);
     NetworkBuffer(NetworkBuffer&) = delete;
-//    NetworkBuffer(NetworkBuffer&& other)
-//        : m_buffer(std::move(other.m_buffer))
-//        , m_length(other.m_length)
-//        , m_layers(std::move(other.m_layers))
-//    {
-//    }
+    //    NetworkBuffer(NetworkBuffer&& other)
+    //        : m_buffer(std::move(other.m_buffer))
+    //        , m_length(other.m_length)
+    //        , m_layers(std::move(other.m_layers))
+    //    {
+    //    }
     NetworkBuffer(NetworkBuffer&&) = default;
 
-    NetworkBuffer& operator=(NetworkBuffer&&)  = default;
+    NetworkBuffer& operator=(NetworkBuffer&&) = default;
 
     static NetworkBuffer WithSize(size_t length) { return NetworkBuffer(VLBuffer::WithSize(length)); }
 
@@ -325,7 +329,8 @@ public:
         return reinterpret_cast<LayerT&>(*layer.second);
     }
 
-    void ResetLayers() {
+    void ResetLayers()
+    {
         m_layers.erase(m_layers.begin(), m_layers.end());
         m_length = 0;
     }
@@ -352,11 +357,13 @@ public:
     VLBufferView GetPayload();
     template <typename T>
     T& GetPayload() { return GetPayload().as<T>(); }
-    size_t Size() { /* m_length does not account for payload size */ return m_buffer.Size(); }
+    size_t Size()
+    { /* m_length does not account for payload size */
+        return m_buffer.Size();
+    }
     u8* Data() { return m_buffer.Data(); }
 
 private:
-
     VLBuffer m_buffer;
     std::list<std::pair<LayerType, std::unique_ptr<NetworkLayer>>> m_layers;
     size_t m_length { 0 };

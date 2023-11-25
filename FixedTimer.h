@@ -4,11 +4,11 @@
 
 #pragma once
 
+#include <functional>
 #include <mutex>
 #include <thread>
-#include <functional>
 
-template<typename T>
+template <typename T>
 class FixedTimer {
     struct TimerNode {
         T* value;
@@ -27,13 +27,11 @@ public:
     {
     }
 
-
-
     [[noreturn]] void Loop()
     {
         for (;;) {
             if (first != nullptr) {
-                std::unique_lock lock (m_list_mutex);
+                std::unique_lock lock(m_list_mutex);
                 const auto time = first->time;
                 lock.unlock();
 
@@ -63,7 +61,7 @@ public:
     TimerRef AddTimer(T* value)
     {
         const auto now = std::chrono::steady_clock::now();
-        std::scoped_lock lock (m_list_mutex);
+        std::scoped_lock lock(m_list_mutex);
 
         if (last == nullptr) {
             first = new TimerNode(value, now + timeout_period, nullptr);
@@ -78,7 +76,7 @@ public:
 
     void RemoveTimer(TimerRef)
     {
-        std::scoped_lock lock (m_list_mutex);
+        std::scoped_lock lock(m_list_mutex);
     }
 
 private:

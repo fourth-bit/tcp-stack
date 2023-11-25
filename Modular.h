@@ -6,12 +6,12 @@
 
 #include <concepts>
 
-struct Closed {};
-struct LowerOpen {};
-struct UpperOpen {};
-struct BothOpen {};
+struct Closed { };
+struct LowerOpen { };
+struct UpperOpen { };
+struct BothOpen { };
 
-template<std::integral T>
+template <std::integral T>
 class Modular {
 public:
     Modular() = default;
@@ -22,7 +22,8 @@ public:
     {
     }
 
-    bool InRange(Modular<T> lower_bound, Modular<T> upper_bound, Closed) {
+    bool InRange(Modular<T> lower_bound, Modular<T> upper_bound, Closed)
+    {
 
         if (lower_bound < upper_bound) {
             // Easy case, normal range check
@@ -35,7 +36,8 @@ public:
             return true;
         }
     }
-    bool InRange(Modular<T> lower_bound, Modular<T> upper_bound, LowerOpen) {
+    bool InRange(Modular<T> lower_bound, Modular<T> upper_bound, LowerOpen)
+    {
 
         if (lower_bound < upper_bound) {
             // Easy case, normal range check
@@ -48,7 +50,8 @@ public:
             return false;
         }
     }
-    bool InRange(Modular<T> lower_bound, Modular<T> upper_bound, UpperOpen) {
+    bool InRange(Modular<T> lower_bound, Modular<T> upper_bound, UpperOpen)
+    {
 
         if (lower_bound < upper_bound) {
             // Easy case, normal range check
@@ -61,7 +64,8 @@ public:
             return false;
         }
     }
-    bool InRange(Modular<T> lower_bound, Modular<T> upper_bound, BothOpen) {
+    bool InRange(Modular<T> lower_bound, Modular<T> upper_bound, BothOpen)
+    {
 
         if (lower_bound < upper_bound) {
             // Easy case, normal range check
@@ -121,7 +125,7 @@ public:
         constexpr T half_rev_T = 1 << (bits - 1);
         Modular<T> half_revolution = *this - half_rev_T;
 
-        return other.InRange(half_revolution, *this, BothOpen{});
+        return other.InRange(half_revolution, *this, BothOpen {});
     }
     bool UnsafeLE(Modular<T> other)
     {

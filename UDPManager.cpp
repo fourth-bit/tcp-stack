@@ -53,7 +53,7 @@ void UDPManager::HandleIncoming(NetworkBuffer buffer, IPv4Connection connection)
         }
 
         auto* ipv4 = buffer.GetLayer<LayerType::IPv4>();
-        IPv4Address source_ip (ipv4->GetHeader().source_ip);
+        IPv4Address source_ip(ipv4->GetHeader().source_ip);
         socket->AppendReadPayload(buffer.GetPayload(), { source_ip }, header.source_port);
     }
 }

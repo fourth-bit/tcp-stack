@@ -4,8 +4,9 @@
 
 #pragma once
 
-#include "NetworkOrder.h"
 #include "IntDefs.h"
+#include "NetworkOrder.h"
+#include <optional>
 #include <string>
 
 class SubnetMask;

@@ -35,7 +35,7 @@ TimerManager::TimerManager()
 
 TimerManager::~TimerManager()
 {
-    std::scoped_lock lock (m_lock);
+    std::scoped_lock lock(m_lock);
 
     u8 data[2] = { 0x01, 0x00 };
     write(m_notify_fd, data, 2);
@@ -53,7 +53,7 @@ TimerManager::~TimerManager()
     close(m_wake_up_fd);
 }
 
-int TimerManager::AddTimer(std::chrono::nanoseconds duration, std::function<void ()> callback)
+int TimerManager::AddTimer(std::chrono::nanoseconds duration, std::function<void()> callback)
 {
     int fd = timerfd_create(CLOCK_MONOTONIC, 0);
 
@@ -83,7 +83,7 @@ int TimerManager::AddTimer(std::chrono::nanoseconds duration, std::function<void
         },
     };
 
-    std::scoped_lock lock (m_lock);
+    std::scoped_lock lock(m_lock);
 
     if (epoll_ctl(m_epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1) {
         close(fd);
@@ -99,7 +99,7 @@ int TimerManager::AddTimer(std::chrono::nanoseconds duration, std::function<void
 
 bool TimerManager::RemoveTimer(int fd)
 {
-    std::scoped_lock lock (m_lock);
+    std::scoped_lock lock(m_lock);
 
     // If during locking, it was removed for some reason, exit early
     if (!m_timer_fds.contains(fd)) {
@@ -118,7 +118,8 @@ bool TimerManager::RemoveTimer(int fd)
 
 void TimerManager::Workfn()
 {
-    while (!ready);
+    while (!ready)
+        ;
 
     while (true) {
         epoll_event ev;
@@ -134,7 +135,7 @@ void TimerManager::Workfn()
         }
 
         // Need a lock to make sure that events cannot be deleted in a race condition
-        std::unique_lock lock (m_lock);
+        std::unique_lock lock(m_lock);
 
         if (!m_timer_fds.contains(fd)) {
             // Just ignore it if it has been removed

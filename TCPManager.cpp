@@ -151,15 +151,14 @@ std::optional<u16> TCPManager::ReserveEphemeral(TCPSocket* socket)
         i++;
     }
 
-    return { };
+    return {};
 }
 
 bool TCPManager::AlertOpenConnection(TCPSocket* listening_socket, TCPSocket* new_socket, TCPConnection connection)
 {
     u16 port = listening_socket->GetPort();
     if (m_listening_ports.contains(port) && m_listening_ports[port] == listening_socket
-        && !m_registered_sockets.contains(new_socket))
-    {
+        && !m_registered_sockets.contains(new_socket)) {
         m_registered_sockets.insert(new_socket);
         m_open_connections[connection] = new_socket;
         return true;

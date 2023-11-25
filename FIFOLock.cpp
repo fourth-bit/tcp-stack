@@ -6,7 +6,7 @@
 
 void FIFOLock::lock()
 {
-    std::unique_lock guard (m_mutex);
+    std::unique_lock guard(m_mutex);
 
     if (!locked) {
         locked = true;
@@ -23,7 +23,7 @@ void FIFOLock::lock()
 
 bool FIFOLock::try_lock()
 {
-    std::unique_lock guard (m_mutex);
+    std::unique_lock guard(m_mutex);
 
     if (!locked) {
         locked = true;
@@ -36,7 +36,7 @@ bool FIFOLock::try_lock()
 
 void FIFOLock::unlock()
 {
-    std::unique_lock guard (m_mutex);
+    std::unique_lock guard(m_mutex);
 
     if (m_ticket_head == m_ticket_tail) {
         locked = false;

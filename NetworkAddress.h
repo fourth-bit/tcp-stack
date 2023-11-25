@@ -6,13 +6,14 @@
 
 #include <variant>
 
-#include "IntDefs.h"
 #include "IPv4Address.h"
+#include "IntDefs.h"
 
 // Fixme: Use 'using' instead
-class NetworkAddress : public std::variant<IPv4Address/*, IPv6Address*/> {};
+class NetworkAddress : public std::variant<IPv4Address /*, IPv6Address*/> { };
 
-inline std::ostream& operator<<(std::ostream& stream, const NetworkAddress& address) {
+inline std::ostream& operator<<(std::ostream& stream, const NetworkAddress& address)
+{
     if (std::holds_alternative<IPv4Address>(address)) {
         stream << std::get<IPv4Address>(address);
     } else {
@@ -22,7 +23,8 @@ inline std::ostream& operator<<(std::ostream& stream, const NetworkAddress& addr
 }
 
 struct NetworkAddressHasher {
-    size_t operator()(const NetworkAddress& addr) const {
+    size_t operator()(const NetworkAddress& addr) const
+    {
         if (std::holds_alternative<IPv4Address>(addr)) {
             return ipv4Hasher(std::get<IPv4Address>(addr));
         }

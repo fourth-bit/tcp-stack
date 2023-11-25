@@ -19,7 +19,6 @@
 #include "NetworkBuffer.h"
 #include "NetworkDevice.h"
 
-
 #define USE_TUN 0
 
 struct make_tun_return {
@@ -484,7 +483,6 @@ void NetworkDevice::SendEthernet(NetworkBuffer data, EthernetMAC destination, u1
     write(tun_fd, data.Data(), data.Size());
 }
 
-
 // Taken from: https://gist.github.com/fxlv/81209bbd150abfeaceb1f85ff076c9f3
 u32 IPv4ChecksumAdd(void* addr, int count, u32 start)
 {
@@ -537,7 +535,10 @@ std::optional<NetworkDevice::Route> NetworkDevice::MakeRoutingDecision(IPv4Addre
         return {};
     }
 
-    return { NetworkDevice::Route { *result, to, } };
+    return { NetworkDevice::Route {
+        *result,
+        to,
+    } };
 }
 void NetworkDevice::ResolveIPv4(NetworkBuffer& buffer, EthernetConnection& eth_connection)
 {

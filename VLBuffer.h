@@ -4,14 +4,15 @@
 
 #pragma once
 
-#include <cstdlib>
-#include <cstdio>
 #include "IntDefs.h"
+#include <cstdio>
+#include <cstdlib>
 
 class VLBuffer;
 
 class VLBufferView {
     friend class VLBuffer;
+
 public:
     VLBufferView SubBuffer(size_t index)
     {
@@ -46,7 +47,7 @@ public:
     const u8* Data() const { return m_data; }
     size_t Size() const { return m_length; }
 
-    template<typename T>
+    template <typename T>
     T& as()
     {
         return *reinterpret_cast<T*>(m_data);
@@ -127,7 +128,7 @@ public:
     void Hexdump()
     {
         printf("Printing hexdump:\n");
-        for (size_t i = 0; i < m_length; i ++) {
+        for (size_t i = 0; i < m_length; i++) {
             if (i % 8 == 0) {
                 printf("\n");
             }
@@ -138,7 +139,8 @@ public:
         fflush(stdout);
     }
 
-    void Resize(size_t length) {
+    void Resize(size_t length)
+    {
         if (m_length < length) {
             // Todo: error
             return;
@@ -147,7 +149,8 @@ public:
         m_length = length;
     }
 
-    VLBuffer Copy() const {
+    VLBuffer Copy() const
+    {
         auto new_buf = VLBuffer::WithSize(m_length);
         std::copy(m_data, m_data + m_length, new_buf.m_data);
 

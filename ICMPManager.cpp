@@ -37,12 +37,14 @@ void ICMPManager::HandleIncoming(NetworkBuffer buffer, IPv4Connection connection
 
         auto& echo_req = buffer.GetPayload<ICMPv4Echo>();
 
-//        auto resp_buf = m_config.BuildBuffer(sizeof(ICMPv4Echo) + data_size);
-//        resp_buf.GetLayer<LayerType::IPv4>()->SetupConnection(m_net_dev->FlipConnection(connection));
+        //        auto resp_buf = m_config.BuildBuffer(sizeof(ICMPv4Echo) + data_size);
+        //        resp_buf.GetLayer<LayerType::IPv4>()->SetupConnection(m_net_dev->FlipConnection(connection));
         auto resp_buf = m_net_dev->FlipConnection(connection).BuildBufferWith(m_config, sizeof(ICMPv4Echo) + data_size);
 
         ICMPLayer* resp_icmp = resp_buf.GetLayer<LayerType::ICMP>();
-        if (!resp_icmp) { return; /* Fixme: Add logging */}
+        if (!resp_icmp) {
+            return; /* Fixme: Add logging */
+        }
 
         auto& resp_header = resp_icmp->GetHeader();
         resp_header.type = ICMPv4Header::EchoResp;
@@ -78,7 +80,7 @@ std::optional<std::chrono::microseconds> ICMPManager::SendEchoRequest(IPv4Addres
 
     int tid = gettid();
 
-    auto [it, did_insert] = m_connection_map.insert({tid, std::move(std::promise<void>()) });
+    auto [it, did_insert] = m_connection_map.insert({ tid, std::move(std::promise<void>()) });
     if (!did_insert) {
         std::cerr << "could not insert" << std::endl;
         return {};

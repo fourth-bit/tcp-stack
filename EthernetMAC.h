@@ -4,9 +4,9 @@
 
 #pragma once
 
+#include "IntDefs.h"
 #include <array>
 #include <string>
-#include "IntDefs.h"
 
 class EthernetMAC : public std::array<u8, 6> {
 public:

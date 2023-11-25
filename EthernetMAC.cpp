@@ -29,11 +29,11 @@ std::string EthernetMAC::ToString() const
 
     snprintf(buf, 18, "%02X:%02X:%02X:%02X:%02X:%02X",
         this->at(0),
-           this->at(1),
-           this->at(2),
-           this->at(3),
-           this->at(4),
-           this->at(5));
+        this->at(1),
+        this->at(2),
+        this->at(3),
+        this->at(4),
+        this->at(5));
 
     return std::string(buf);
 }

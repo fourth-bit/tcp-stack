@@ -4,8 +4,8 @@
 
 #include "NetworkBuffer.h"
 #include "NetworkDevice.h"
-#include <cstring>
 #include <cassert>
+#include <cstring>
 #include <iostream>
 #include <netinet/ip.h>
 #include <unordered_map>
@@ -225,7 +225,8 @@ void ARPLayer::Config::ConfigureLayer(NetworkLayer& net_layer)
     }
 }
 
-static u16 GenerateIPID() {
+static u16 GenerateIPID()
+{
     return rand();
 }
 

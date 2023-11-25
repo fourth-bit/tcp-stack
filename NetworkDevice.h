@@ -23,7 +23,7 @@
 #include "VLBuffer.h"
 
 u16 IPv4Checksum(void* address, int num_bytes);
-u32 IPv4ChecksumAdd(void* address, int count, u32 start=0);
+u32 IPv4ChecksumAdd(void* address, int count, u32 start = 0);
 u16 IPv4ChecksumEnd(u32);
 
 struct EthernetConnection {

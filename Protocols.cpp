@@ -129,7 +129,7 @@ void IPv4Buffer::CopyIPHeader(const IPv4Header& other)
 }
 IPv4Buffer IPv4Buffer::WithSize(size_t size)
 {
-    return IPv4Buffer(VLBuffer::WithSize(size + sizeof (EthernetHeader) + sizeof(IPv4Header)));
+    return IPv4Buffer(VLBuffer::WithSize(size + sizeof(EthernetHeader) + sizeof(IPv4Header)));
 }
 
 void ARPBuffer::SetupARPHeader(arp_hardware hw_type, arp_proto pro_type)
@@ -181,6 +181,7 @@ u16 ICMPv4Buffer::RunICMPv4Checksum()
 
     return IPv4Checksum(m_buffer.Data() + header_offset, header_len);
 }
-void ICMPv4Buffer::ApplyICMPv4Checksum() {
+void ICMPv4Buffer::ApplyICMPv4Checksum()
+{
     GetICMPv4Header().checksum = RunICMPv4Checksum();
 }

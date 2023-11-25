@@ -16,7 +16,7 @@ public:
     virtual std::string ToString() = 0;
 };
 
-template<typename T>
+template <typename T>
 class ErrorOr {
 public:
     ErrorOr(std::unique_ptr<Error> error)

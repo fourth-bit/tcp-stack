@@ -4,10 +4,10 @@
 
 #pragma once
 
-#include "NetworkOrder.h"
-#include "VLBuffer.h"
 #include "EthernetMAC.h"
 #include "IntDefs.h"
+#include "NetworkOrder.h"
+#include "VLBuffer.h"
 
 struct EthernetConnection;
 struct IPv4Connection;

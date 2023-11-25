@@ -69,7 +69,6 @@ public:
         AcceptOnNonListeningSocket,
     };
 
-
     static std::unique_ptr<Error> Make(Code code, std::string information = "")
     {
         return std::unique_ptr<Error>(new SocketError(code, std::move(information)));
@@ -256,7 +255,6 @@ class TCPSocket : public Socket {
         std::optional<TCPTimePoint> send_timestamp;
         bool retransmitted { false };
     };
-
 
 public:
     TCPSocket(TCPManager*, const NetworkBufferConfig&, PROTOCOL proto, Badge<Socket>);

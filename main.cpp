@@ -912,15 +912,15 @@ void runNewCustomClient()
 
     std::cout << IPv4Address(ip_address) << std::endl;
 
-//    for (int i = 0; i < 10; i++) {
-//        auto address = IPv4Address::FromString("172.18.0.7");
-//        auto maybe_us = the_net_dev->GetICMPManager().SendEchoRequest(*address);
-//        if (maybe_us) {
-//            std::cout << "Ping (" << i << ") back in " << maybe_us->count() << "us" << std::endl;
-//        } else {
-//            std::cout << "Ping (" << i << ") failed" << std::endl;
-//        }
-//    }
+    //    for (int i = 0; i < 10; i++) {
+    //        auto address = IPv4Address::FromString("172.18.0.7");
+    //        auto maybe_us = the_net_dev->GetICMPManager().SendEchoRequest(*address);
+    //        if (maybe_us) {
+    //            std::cout << "Ping (" << i << ") back in " << maybe_us->count() << "us" << std::endl;
+    //        } else {
+    //            std::cout << "Ping (" << i << ") failed" << std::endl;
+    //        }
+    //    }
 
     auto* sock = dynamic_cast<TCPSocket*>(Socket::Create(PROTOCOL::INTERNET, SOCK_TYPE::STREAM));
     sock->Bind(1000);
@@ -994,7 +994,6 @@ void runNewCustomClient()
         do {
             written += subsocket->Write(view.SubBuffer(written));
         } while (written != buffer.Size());
-
     }
 
     if (th.joinable()) {
@@ -1089,7 +1088,7 @@ int main()
 
     VLBuffer buffer_to_write = VLBuffer::WithSize(18);
     for (char x = 'a'; x < 'a' + 18; x++) {
-        buffer_to_write[x-'a'] = x;
+        buffer_to_write[x - 'a'] = x;
     }
 
     buffer.Write(buffer_to_write.AsView());
@@ -1110,13 +1109,13 @@ int main()
 
     TimerManager manager;
 
-    manager.AddTimer(20ms, [](){
+    manager.AddTimer(20ms, []() {
         std::cout << "Timer 1 Fired" << std::endl;
     });
-    manager.AddTimer(200ms, [](){
+    manager.AddTimer(200ms, []() {
         std::cout << "Timer 2 Fired" << std::endl;
     });
-    manager.AddTimer(2ms, [](){
+    manager.AddTimer(2ms, []() {
         std::cout << "Timer 3 Fired" << std::endl;
     });
 

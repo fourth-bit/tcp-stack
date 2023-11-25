@@ -2,9 +2,9 @@
 // Created by Ryan Wolk on 3/27/22.
 //
 
+#include "IPv4Address.h"
 #include <optional>
 #include <sstream>
-#include "IPv4Address.h"
 
 std::optional<IPv4Address> IPv4Address::FromString(const std::string& str)
 {

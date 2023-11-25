@@ -4,9 +4,9 @@
 
 #pragma once
 
-#include <mutex>
-#include <list>
 #include <condition_variable>
+#include <list>
+#include <mutex>
 
 class FIFOLock {
 public:
