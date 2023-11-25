@@ -134,15 +134,20 @@ void TimerManager::Workfn()
         }
 
         // Need a lock to make sure that events cannot be deleted in a race condition
-        std::scoped_lock lock (m_lock);
+        std::unique_lock lock (m_lock);
 
         if (!m_timer_fds.contains(fd)) {
             // Just ignore it if it has been removed
             continue;
         }
 
+        auto function = std::move(m_timer_fds[fd]);
+
+        // Avoid a possible deadlock situation inside the callback
+        lock.unlock();
+
         // Invoke the callback
-        m_timer_fds[fd]();
+        function();
 
         // Destroy the timer
         epoll_ctl(m_epoll_fd, EPOLL_CTL_DEL, fd, nullptr);
