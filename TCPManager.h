@@ -8,6 +8,7 @@
 #include "NetworkAddress.h"
 #include "NetworkBuffer.h"
 #include "Socket.h"
+#include "TimerManager.h"
 #include "Utils.h"
 #include <unordered_map>
 #include <unordered_set>
@@ -67,6 +68,8 @@ public:
 
     void SendPacket(NetworkBuffer, NetworkAddress);
 
+    TimerManager& GetRetransmissionTimers() { return m_retransmission_queue; };
+
 private:
     NetworkDevice* m_net_dev;
 
@@ -84,6 +87,8 @@ private:
     // Set of registered sockets: Means sockets that are in m_listening_ports
     // or in m_open_connections
     std::unordered_set<TCPSocket*> m_registered_sockets { };
+
+    TimerManager m_retransmission_queue;
 
     u16 current_ephemeral { ephemeral_floor };
 };

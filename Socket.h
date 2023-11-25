@@ -248,9 +248,13 @@ class TCPSocket : public Socket {
         } SND;
     };
 
+    using TCPTimePoint = std::chrono::time_point<std::chrono::steady_clock>;
+
     struct UnackedPacket {
         VLBuffer data;
         Modular<u32> seq_num;
+        std::optional<TCPTimePoint> send_timestamp;
+        bool retransmitted { false };
     };
 
 
@@ -285,6 +289,8 @@ private:
     void WriteImpl_nolock(VLBuffer);
     void DrainWriteBuffer_nolock();
 
+    void RTTCallback(Modular<u32>);
+
     TCPManager* m_manager;
     PROTOCOL m_proto;
     const NetworkBufferConfig& m_general_config;
@@ -310,8 +316,11 @@ private:
     FIFOLock m_read_queue;
 
     std::queue<UnackedPacket> m_unacked_packets;
-    // FIXME: Round-Trip-Time Measurement (RFC 6298)
-    std::chrono::milliseconds m_retransmission_timeout { 1000 };
+    // Using language from RFC 6298
+    std::chrono::milliseconds m_RTO { 1000 };
+    std::chrono::milliseconds m_SRTT { -1 };
+    std::chrono::milliseconds m_RTTVAR { -1 };
+    std::optional<int> m_retransmission_timer_fd;
 
     // Locks everything related to writing data: retransmission queue, nagle queue, etc.
     std::mutex m_write_lock;

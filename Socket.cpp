@@ -28,6 +28,23 @@ u8 socktype_to_ipproto(SOCK_TYPE type)
     }
 }
 
+template <typename T>
+struct is_chrono_duration {
+    static constexpr bool value = false;
+};
+template <typename T, typename U>
+struct is_chrono_duration<std::chrono::duration<T, U>> {
+    static constexpr bool value = true;
+};
+template <typename T>
+concept chrono_duration = is_chrono_duration<T>::value;
+
+template <chrono_duration T>
+T chrono_lerp(T t1, T t2, double factor)
+{
+    return T((typename T::rep)((1 - factor) * t1.count() + factor * t2.count()));
+}
+
 Socket* Socket::Create(PROTOCOL proto, SOCK_TYPE type)
 {
     const NetworkBufferConfig* config { nullptr };
@@ -530,9 +547,20 @@ u64 TCPSocket::Write(VLBufferView data)
 
 void TCPSocket::WriteImpl_nolock(VLBuffer data)
 {
+    size_t packet_len = data.Size();
     SendTCPPacket(TCPHeader::PSH | TCPHeader::ACK, data.Copy(), m_tcb.SND.NXT.Get(), m_tcb.RCV.NXT.Get());
-    m_tcb.SND.NXT += data.Size();
-    m_unacked_packets.emplace(std::move(data), m_tcb.SND.NXT);
+    m_unacked_packets.emplace(std::move(data), m_tcb.SND.NXT, TCPTimePoint::clock::now());
+
+    // (RFC 6298) 5. Managing the RTO Timer
+    // 5.1 Start the timer on packet send, if the timer is not running
+    if (!m_retransmission_timer_fd.has_value()) {
+        Modular<u32> sent_seq_num = m_tcb.SND.NXT;
+        m_retransmission_timer_fd = m_manager->GetRetransmissionTimers().AddTimer(
+            m_RTO,
+            [this, sent_seq_num]() { RTTCallback(sent_seq_num); });
+    }
+
+    m_tcb.SND.NXT += packet_len;
 }
 
 void TCPSocket::DrainWriteBuffer_nolock()
@@ -558,6 +586,7 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
     // FIXME: RFC 5961 Recommendations
 
     using enum TCPHeader::Flags;
+    using namespace std::chrono_literals;
 
     auto* tcp_layer = buffer.GetLayer<LayerType::TCP>();
     if (tcp_layer == nullptr) {
@@ -901,13 +930,52 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
         // Fifth, check the ACK bit
         if (header.flags & ACK) {
             if (ack_num.InRange(m_tcb.SND.UNA, m_tcb.SND.NXT, LowerOpen {})) {
-                std::scoped_lock lock (m_write_lock);
+                std::scoped_lock lock(m_write_lock);
+
+                bool was_data_acked = false;
 
                 while (!m_unacked_packets.empty()) {
-                    auto awaiting_ack = m_unacked_packets.front().seq_num;
+                    auto& unacked_packet = m_unacked_packets.front();
+                    auto awaiting_ack = unacked_packet.seq_num;
 
-                    if (awaiting_ack.InRange(m_tcb.SND.UNA, ack_num, Closed {})) {
+                    if (awaiting_ack.InRange(m_tcb.SND.UNA, ack_num, UpperOpen {})) {
+                        if (!unacked_packet.retransmitted && unacked_packet.send_timestamp.has_value()) {
+                            auto now = TCPTimePoint::clock::now();
+                            auto sample = duration_cast<std::chrono::milliseconds>(now - *unacked_packet.send_timestamp);
+
+                            // Assume millisecond precision
+                            constexpr std::chrono::milliseconds G { 1 };
+                            constexpr int K = 4;
+                            constexpr double ALPHA = 1.0 / 8.0;
+                            constexpr double BETA = 1.0 / 4.0;
+
+                            if (m_SRTT == -1ms) {
+                                // Then no samples have been taken
+                                // RFC 6298 2.2
+                                m_SRTT = sample;
+                                m_RTTVAR = sample / 2;
+                                m_RTO = m_SRTT + std::max(G, K * m_RTTVAR);
+                            } else {
+                                // RFC 6298 2.3
+
+                                // Absolute value without having to deal with absolute value
+                                if (m_SRTT > sample) {
+                                    m_RTTVAR = chrono_lerp(m_RTTVAR, m_SRTT - sample, BETA);
+                                } else {
+                                    m_RTTVAR = chrono_lerp(m_RTTVAR, sample - m_SRTT, BETA);
+                                }
+                                m_SRTT = chrono_lerp(m_SRTT, sample, ALPHA);
+                                m_RTO = m_SRTT + std::max(G, K * m_RTTVAR);
+                            }
+
+                            // When RTO is calculated, if it is less than 1 second, bound it to 1 second
+                            if (m_RTO < 1s) {
+                                m_RTO = 1s;
+                            }
+                        }
+
                         m_unacked_packets.pop();
+                        was_data_acked = true;
                     } else {
                         break;
                     }
@@ -915,8 +983,35 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
 
                 m_tcb.SND.UNA = ack_num;
 
-                if (m_tcb.SND.UNA == m_tcb.SND.NXT && m_write_buffer.GetUsedLength() != 0) {
-                    DrainWriteBuffer_nolock();
+                if (m_tcb.SND.UNA == m_tcb.SND.NXT) {
+                    // All data has been ACKED
+                    // (RFC 6298) 5.2 Turn off the RTT
+                    if (m_retransmission_timer_fd.has_value()) {
+                        m_manager->GetRetransmissionTimers().RemoveTimer(*m_retransmission_timer_fd);
+                        m_retransmission_timer_fd = {};
+                    }
+
+                    // And we now have some data to send
+                    if (m_write_buffer.GetUsedLength() != 0) {
+                        DrainWriteBuffer_nolock();
+                    }
+                } else if (was_data_acked) {
+                    // (RFC 6298) 5.3 If we ACKED some data, but not all of it, reset the RTT
+                    if (m_retransmission_timer_fd.has_value()) {
+                        m_manager->GetRetransmissionTimers().RemoveTimer(*m_retransmission_timer_fd);
+                    }
+
+                    if (!m_unacked_packets.empty()) {
+                        Modular<u32> next_retrans_seq = m_unacked_packets.front().seq_num;
+
+                        m_retransmission_timer_fd = m_manager->GetRetransmissionTimers().AddTimer(
+                            m_RTO,
+                            [this, next_retrans_seq]() { RTTCallback(next_retrans_seq); });
+                    } else {
+                        // CONTROL SHOULD NOT REACH HERE, THIS MEANS THAT WE THINK THERE
+                        // IS DATA LEFT TO ACK, BUT WE HAVE NO RECORD OF THOSE PACKETS
+                        assert(false);
+                    }
                 }
 
                 // Check if our fin is ACKED, only for states in the close sequence
@@ -1028,7 +1123,7 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
                 break;
             }
 
-            std::scoped_lock write_lock (m_write_lock);
+            std::scoped_lock write_lock(m_write_lock);
 
             if (m_tcb.SND.UNA == m_tcb.SND.NXT && m_write_buffer.GetUsedLength() != 0) {
                 size_t write_size = std::min(std::min(m_write_buffer.GetUsedLength(), getUsableWindow()), MSS);
@@ -1094,4 +1189,51 @@ u32 TCPSocket::GenerateISS()
     // Fixme: This is what would be considered a worst practice. There is something
     //        in the RFC that says how to handle this
     return random();
+}
+
+void TCPSocket::RTTCallback(Modular<u32> seq_num)
+{
+    using namespace std::chrono_literals;
+    // Steps from RFC 6298
+
+    // Lock for the retransmission queue
+    std::scoped_lock lock(m_write_lock);
+
+    // Possible race condition: Segment arrives when RTT timer goes off
+    // While executing HandleIncoming, the locks are taken, so when we get
+    // here the outstanding packet has been ACKED, and the RTT reset, so
+    // how can we differentiate between that RTT and the one where nothing
+    // has arrived?
+
+    if (m_unacked_packets.empty()) {
+        // This means that the above condition happened
+        return;
+    }
+
+    auto& unacked_packet = m_unacked_packets.front();
+
+    if (unacked_packet.seq_num != seq_num) {
+        // This means that the packet we are supposed to be retransmitting has
+        // been ACKED in the time it took to get the lock, meaning the above
+        // condition happened
+        return;
+    }
+
+    // 5.4 Retransmit the last segment
+    unacked_packet.retransmitted = true;
+    SendTCPPacket(TCPHeader::PSH | TCPHeader::ACK, unacked_packet.data.Copy(), unacked_packet.seq_num.Get(), m_tcb.RCV.NXT.Get());
+
+    Modular<u32> transmitted_seq_num = unacked_packet.seq_num;
+
+    // 5.5 Exponential backing on the RTO
+    m_RTO *= 2;
+    // 2.5 MAY place an upper limit on the RTO, of at least 60 seconds
+    if (m_RTO >= 60s) {
+        m_RTO = 60s;
+    }
+
+    // 5.6 Restart the RTT with new timeout
+    m_retransmission_timer_fd = m_manager->GetRetransmissionTimers().AddTimer(
+        m_RTO,
+        [this, transmitted_seq_num]() { RTTCallback(transmitted_seq_num); });
 }
