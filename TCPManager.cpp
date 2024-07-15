@@ -112,9 +112,11 @@ bool TCPManager::Unregister(std::shared_ptr<TCPSocketBackend> socket)
         m_registered_sockets.erase(socket);
     }
 
-    for (auto it = m_ports_in_use.begin(); it != m_ports_in_use.end(); ++it) {
+    for (auto it = m_ports_in_use.begin(); it != m_ports_in_use.end();) {
         if (it->second == socket) {
-            m_ports_in_use.erase(it);
+            it = m_ports_in_use.erase(it);
+        } else {
+            ++it;
         }
     }
 
