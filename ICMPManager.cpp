@@ -21,8 +21,6 @@ ICMPManager::ICMPManager(NetworkDevice* dev)
 
 void ICMPManager::HandleIncoming(NetworkBuffer buffer, IPv4Connection connection)
 {
-    auto* ipv4 = buffer.GetLayer<LayerType::IPv4>();
-    // FIXME: sanity check on ipv4, this is the icmpv4 handler, so theoretically it is good
     auto& icmp = buffer.AddLayer<LayerType::ICMP>(sizeof(ICMPv4Header));
     auto& header = icmp.GetHeader();
 
@@ -60,7 +58,7 @@ void ICMPManager::HandleIncoming(NetworkBuffer buffer, IPv4Connection connection
 
         resp_icmp->ApplyICMPv4Checksum(sizeof(ICMPv4Echo) + data_size);
 
-        m_net_dev->SendIPv4(std::move(resp_buf), IPv4Address(ipv4->GetHeader().source_ip), IPv4Header::ICMP);
+        m_net_dev->SendIPv4(std::move(resp_buf), connection.connected_ip, IPv4Header::ICMP);
         break;
     }
     case ICMPv4Header::EchoResp: {

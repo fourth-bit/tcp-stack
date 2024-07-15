@@ -83,8 +83,7 @@ void IPv4Layer::SetupConnection(const IPv4Connection& connection)
 void IPv4Layer::CopyHeader(const IPv4Header& other)
 {
     IPv4Header* header = &GetHeader();
-    // FIXME: This is problematic if I end up packing options
-    memcpy(header, &other, sizeof(IPv4Header));
+    memcpy(header, &other, other.header_length * 4);
 }
 void IPv4Layer::ApplyChecksum()
 {

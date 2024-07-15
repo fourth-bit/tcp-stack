@@ -185,7 +185,6 @@ public:
 
         size_t LayerSize() override { return sizeof(TCPHeader) + options_length(); };
 
-        // Fixme: Needs Implementation
         void ConfigureLayer(NetworkLayer&) override;
     };
 
