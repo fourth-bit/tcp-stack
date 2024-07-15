@@ -52,7 +52,6 @@ void runNewCustomClient()
         16,
         IPv4Address::FromString("172.18.0.1").value());
 
-
     std::cout << IPv4Address(ip_address) << std::endl;
 
     //    for (int i = 0; i < 10; i++) {
@@ -65,7 +64,7 @@ void runNewCustomClient()
     //        }
     //    }
 
-    std::unique_ptr<TCPSocket> sock (dynamic_cast<TCPSocket*>(Socket::Create(PROTOCOL::INTERNET, SOCK_TYPE::STREAM)));
+    std::unique_ptr<TCPSocket> sock(dynamic_cast<TCPSocket*>(Socket::Create(PROTOCOL::INTERNET, SOCK_TYPE::STREAM)));
     sock->Bind(1000);
     auto maybe_target = IPv4Address::FromString("172.18.0.2");
     if (!maybe_target.has_value()) {
