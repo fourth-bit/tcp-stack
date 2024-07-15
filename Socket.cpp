@@ -479,8 +479,12 @@ ErrorOr<VLBuffer> TCPSocket::Read()
     std::unique_lock lock2(m_read_buffer_lock);
 
     m_read_cv.wait(lock2, [this]() {
-        return current_read_size != 0;
+        return current_read_size != 0 || m_remote_closing;
     });
+
+    if (current_read_size == 0 && m_remote_closing) {
+        return SocketError::Make(SocketError::Code::ConnectionClosing);
+    }
 
     auto ret = m_receive_buffer.Read(current_read_size);
     current_read_size = 0;
@@ -494,8 +498,17 @@ u64 TCPSocket::Write(VLBufferView data)
      * until we can.
      */
 
-    if (data.Size() == 0) {
-        return 0;
+    {
+        std::scoped_lock lock(m_tcb_lock);
+        // Stop data from being sent when we don't want it. Makes some state based
+        // logic easier if we don't have pending sends in SYN_RCVD for closing the socket.
+        // Also prevent WRITEs in the case that we are blocking on data being sent in CLOSE,
+        // but we haven't officially sent a FIN
+        if (data.Size() == 0
+            || (m_tcb.state != State::ESTABLISHED && m_tcb.state != State::CLOSE_WAIT)
+            || m_client_closing) {
+            return 0;
+        }
     }
 
     /* How do we want the data to actually send?
@@ -572,12 +585,94 @@ void TCPSocket::DrainWriteBuffer_nolock()
     while (m_write_buffer.GetUsedLength() >= MSS && getUsableWindow() >= MSS) {
         WriteImpl_nolock(m_write_buffer.Read(MSS));
     }
+
+    if (m_client_closing && m_write_buffer.Empty()) {
+        m_close_cv.notify_all();
+    }
 }
 
 bool TCPSocket::Close()
 {
-    assert(false);
-    return 0;
+    return Close(false);
+}
+
+bool TCPSocket::Close(bool ignore_already_closing)
+{
+    using enum TCPHeader::Flags;
+
+    // FIXME: Grab the correct locks for this
+    std::unique_lock lock(m_tcb_lock);
+
+    if (m_client_closing && !ignore_already_closing) {
+        // Stop us from closing twice
+        return false;
+    }
+
+    m_client_closing = true;
+
+    // In Closing send relevant signals to condition variables
+    switch (m_tcb.state) {
+    case State::CLOSED:
+        return false;
+    case State::LISTEN:
+        return m_manager->Unregister(shared_from_this());
+    case State::SYN_SENT:
+        return m_manager->Unregister(shared_from_this());
+    case State::SYN_RCVD:
+        // Because we disallow sends in SYN_RCVD, the logic is much simpler
+        // to implement to spec
+
+        SendTCPPacket(FIN | ACK, {}, m_tcb.SND.NXT.Get(), m_tcb.RCV.NXT.Get());
+        m_unacked_packets.push(UnackedPacket {
+            .data = VLBuffer::WithSize(0),
+            .seq_num = m_tcb.SND.NXT,
+            .send_timestamp = TCPTimePoint::clock::now(),
+            .is_fin = true,
+        });
+        m_fin_sent = true;
+        m_fin_number = m_tcb.SND.NXT;
+        m_tcb.SND.NXT += 1;
+        m_tcb.state = State::FIN_WAIT_1;
+        break;
+    case State::ESTABLISHED:
+    case State::CLOSE_WAIT:
+        // Slightly different here in the state transition
+        // Anyway, block until all sent data has been properly processed
+        // The send logic requires the tcb lock, so it makes sense to wait
+        // with it
+
+        if (!m_write_buffer.Empty()) {
+            m_close_cv.wait(lock);
+
+            // Now that we've waited, the state may have changed, so our actions
+            // logically should change
+            lock.unlock();
+            return Close(true);
+        } else {
+            SendTCPPacket(FIN | ACK, {}, m_tcb.SND.NXT.Get(), m_tcb.RCV.NXT.Get());
+            m_unacked_packets.push(UnackedPacket {
+                .data = VLBuffer::WithSize(0),
+                .seq_num = m_tcb.SND.NXT,
+                .send_timestamp = TCPTimePoint::clock::now(),
+                .is_fin = true,
+            });
+            m_fin_sent = true;
+            m_fin_number = m_tcb.SND.NXT;
+            m_tcb.SND.NXT += 1;
+
+            // Here is where it diverges in the spec
+            if (m_tcb.state == State::ESTABLISHED) {
+                m_tcb.state = State::FIN_WAIT_1;
+            } else {
+                m_tcb.state = State::LAST_ACK;
+            }
+        }
+        break;
+    default:
+        return false;
+    }
+
+    return true;
 }
 
 void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connection)
@@ -586,6 +681,12 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
 
     using enum TCPHeader::Flags;
     using namespace std::chrono_literals;
+
+    // For simplicity, grab all locks at the beginning
+    std::unique_lock tcb_lock(m_tcb_lock, std::defer_lock);
+    std::unique_lock read_lock(m_read_buffer_lock, std::defer_lock);
+    std::unique_lock write_lock(m_write_lock, std::defer_lock);
+    std::lock(tcb_lock, read_lock, write_lock);
 
     auto* tcp_layer = buffer.GetLayer<LayerType::TCP>();
     if (tcp_layer == nullptr) {
@@ -929,8 +1030,6 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
         // Fifth, check the ACK bit
         if (header.flags & ACK) {
             if (ack_num.InRange(m_tcb.SND.UNA, m_tcb.SND.NXT, LowerOpen {})) {
-                std::scoped_lock lock(m_write_lock);
-
                 bool was_data_acked = false;
 
                 while (!m_unacked_packets.empty()) {
@@ -1044,10 +1143,12 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
                 }
             }
 
-            if (getState() == State::TIME_WAIT) {
-                // FIXME: The only thing that can arrive in this state is a retransmission of the remote FIN.
-                //  Acknowledge it, and restart the 2 MSL timeout.
-            }
+            // Here because it says so in RFC, but handled later
+            // if (getState() == State::TIME_WAIT) {
+            // The only thing that can arrive in this state is a retransmission of the remote FIN.
+            // Acknowledge it, and restart the 2 MSL timeout.
+            // Handled in the FIN if statment
+            // }
 
             if (getState() == State::FIN_WAIT_2) {
                 // TODO: if the retransmission queue is empty, the user's CLOSE can be acknowledged ("ok")
@@ -1072,9 +1173,6 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
 
             // Seventh, process the segment text. FIXME: zero window probes
             if (segment_length != 0) {
-                // Acquire the lock for the read buffer to stop any possible data races
-                std::unique_lock rb_lock(m_read_buffer_lock);
-
                 if (m_receive_buffer.Write(buffer.GetPayload())) {
                     m_tcb.RCV.NXT += segment_length;
                     m_tcb.RCV.WND = m_receive_buffer.RemainingSpace();
@@ -1083,7 +1181,7 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
                     SendTCPPacket(ACK, {}, m_tcb.SND.NXT.Get(), m_tcb.RCV.NXT.Get());
 
                     if (header.flags & PSH) {
-                        // FIXME: THIS BEHAVIOR IS WRONG
+                        // FIXME: THIS BEHAVIOR IS WRONG, and correct behavior in FIN
                         // Update the current_read_size
                         current_read_size = m_receive_buffer.GetUsedLength();
 
@@ -1095,39 +1193,43 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
         }
 
         if (header.flags & FIN) {
-            // TODO: Signal connection closing to any pending reads
-            // TODO: Also, this FIN implies header.flags & PSH, so push the data in the buffer
-
             switch (getState()) {
             case State::ESTABLISHED:
                 m_tcb.state = State::CLOSE_WAIT;
-                break;
+                goto ack_fin;
             case State::FIN_WAIT_1:
                 if (m_fin_acked) {
-                    // TODO: Start the time wait timer, turn off other timers
-                    m_tcb.state = State::TIME_WAIT;
+                    EnterTimeWait_nolock();
                 } else {
                     m_tcb.state = State::CLOSING;
                 }
-                break;
+                goto ack_fin;
             case State::FIN_WAIT_2:
-                // TODO: Start the time wait timer, turn off other timers
-                m_tcb.state = State::TIME_WAIT;
-                break;
             case State::TIME_WAIT:
-                // TODO: Restart the 2 MSL timer
+                EnterTimeWait_nolock();
+                goto ack_fin;
+
+            ack_fin:
+                m_tcb.RCV.NXT += 1;
+                SendTCPPacket(ACK, {}, m_tcb.SND.NXT.Get(), m_tcb.RCV.NXT.Get());
                 break;
+
             default:
                 // In all other cases, do nothing
                 break;
             }
 
-            std::scoped_lock write_lock(m_write_lock);
+            // Fixme: Fix when we correct the way that PSH works above
+            current_read_size = m_receive_buffer.GetUsedLength();
+            m_remote_closing = true;
+            m_read_cv.notify_all();
+        }
 
-            if (m_tcb.SND.UNA == m_tcb.SND.NXT && m_write_buffer.GetUsedLength() != 0) {
-                size_t write_size = std::min(std::min(m_write_buffer.GetUsedLength(), getUsableWindow()), MSS);
-                WriteImpl_nolock(m_write_buffer.Read(write_size));
-            }
+        // If we have any unsent data, and now we have window, send the data
+        // FIXME: Correct implementation of Nagle's Algorithm
+        if (m_tcb.SND.UNA == m_tcb.SND.NXT && m_write_buffer.GetUsedLength() != 0) {
+            size_t write_size = std::min(std::min(m_write_buffer.GetUsedLength(), getUsableWindow()), MSS);
+            WriteImpl_nolock(m_write_buffer.Read(write_size));
         }
 
         break;
@@ -1220,7 +1322,11 @@ void TCPSocket::RTTCallback(Modular<u32> seq_num)
 
     // 5.4 Retransmit the last segment
     unacked_packet.retransmitted = true;
-    SendTCPPacket(TCPHeader::PSH | TCPHeader::ACK, unacked_packet.data.Copy(), unacked_packet.seq_num.Get(), m_tcb.RCV.NXT.Get());
+    if (!unacked_packet.is_fin) {
+        SendTCPPacket(TCPHeader::PSH | TCPHeader::ACK, unacked_packet.data.Copy(), unacked_packet.seq_num.Get(), m_tcb.RCV.NXT.Get());
+    } else {
+        SendTCPPacket(TCPHeader::FIN | TCPHeader::ACK, {}, unacked_packet.seq_num.Get(), m_tcb.RCV.NXT.Get());
+    }
 
     Modular<u32> transmitted_seq_num = unacked_packet.seq_num;
 
@@ -1235,4 +1341,26 @@ void TCPSocket::RTTCallback(Modular<u32> seq_num)
     m_retransmission_timer_fd = m_manager->GetRetransmissionTimers().AddTimer(
         m_RTO,
         [this, transmitted_seq_num]() { RTTCallback(transmitted_seq_num); });
+}
+
+void TCPSocket::EnterTimeWait_nolock()
+{
+    m_tcb.state = State::TIME_WAIT;
+
+    // Start a 2 MSL Timer, disable all other timers
+    if (m_retransmission_timer_fd.has_value()) {
+        m_manager->GetRetransmissionTimers().RemoveTimer(*m_retransmission_timer_fd);
+    }
+
+    int fd = m_manager->GetRetransmissionTimers().AddTimer(2 * m_RTO, [this] {
+        // I'm worried about what could happen if this gets deallocated during the callback
+        // as capturing this is a weak reference
+        auto shared_this = shared_from_this();
+
+        // When this timer expires, we delete the TCB, and close the connection
+        m_tcb.state = State::CLOSED;
+        m_manager->Unregister(shared_from_this());
+    });
+
+    m_retransmission_timer_fd = fd;
 }

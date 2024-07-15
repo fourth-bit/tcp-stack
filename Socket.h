@@ -67,6 +67,7 @@ public:
         WriteToConnectionSocket,
         SimultaneousAccept,
         AcceptOnNonListeningSocket,
+        ConnectionClosing,
     };
 
     static std::unique_ptr<Error> Make(Code code, std::string information = "")
@@ -253,6 +254,7 @@ class TCPSocket : public Socket {
         VLBuffer data;
         Modular<u32> seq_num;
         std::optional<TCPTimePoint> send_timestamp;
+        bool is_fin { false };
         bool retransmitted { false };
     };
 
@@ -289,6 +291,10 @@ private:
 
     void RTTCallback(Modular<u32>);
 
+    void EnterTimeWait_nolock();
+
+    bool Close(bool ignore_already_closing);
+
     TCPManager* m_manager;
     PROTOCOL m_proto;
     const NetworkBufferConfig& m_general_config;
@@ -298,6 +304,7 @@ private:
     u16 m_connected_port { 0 };
 
     TCB m_tcb;
+    std::mutex m_tcb_lock;
     size_t MSS;
 
     u16 m_bound_port { 0 };
@@ -310,6 +317,9 @@ private:
     Modular<u32> m_fin_number { 0 };
     bool m_fin_sent { false };
     bool m_fin_acked { false };
+    bool m_remote_closing { false };
+    bool m_client_closing { false };
+    std::condition_variable m_close_cv;
 
     FIFOLock m_read_queue;
 

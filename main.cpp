@@ -87,6 +87,9 @@ void runNewCustomClient()
         auto buffer = std::move(maybe_buffer.GetResult());
 
         sock->Write(buffer.AsView());
+
+        sock->Close();
+        return;
     }
     // sock->Listen();
 
@@ -269,6 +272,7 @@ int main()
 #else
     runNewCustomClient();
 
+    std::this_thread::sleep_for(std::chrono::seconds(5));
 
     return 0;
 #endif
