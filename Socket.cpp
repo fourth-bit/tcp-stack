@@ -68,7 +68,13 @@ Socket* Socket::Create(PROTOCOL proto, SOCK_TYPE type)
     }
 
     if (type == SOCK_TYPE::STREAM) {
-        return new TCPSocket(&the_net_dev->GetTCPManager(), *config, proto, {});
+        std::shared_ptr<TCPSocketBackend> backend = std::make_shared<TCPSocketBackend>(
+            &the_net_dev->GetTCPManager(),
+            *config,
+            proto,
+            Badge<Socket> {});
+
+        return new TCPSocket(backend);
     } else if (type == SOCK_TYPE::DATAGRAM) {
         return new UDPSocket(&the_net_dev->GetUDPManager(), *config, {});
     } else if (type == SOCK_TYPE::RAW) {
@@ -374,11 +380,15 @@ bool UDPSocket::UnregisterSubsocket(UDPSocket* socket)
     return false;
 }
 
-TCPSocket::TCPSocket(TCPManager* manager, const NetworkBufferConfig& config, PROTOCOL proto, Badge<Socket>)
-    : TCPSocket(manager, config, proto)
+TCPSocketBackend::TCPSocketBackend(TCPManager* manager, const NetworkBufferConfig& config, PROTOCOL proto, Badge<Socket>)
+    : TCPSocketBackend(manager, config, proto)
 {
 }
-TCPSocket::TCPSocket(TCPManager* manager, const NetworkBufferConfig& config, PROTOCOL proto)
+TCPSocketBackend::TCPSocketBackend(TCPManager* manager, const NetworkBufferConfig& config, PROTOCOL proto, Badge<TCPSocketBackend>)
+    : TCPSocketBackend(manager, config, proto)
+{
+}
+TCPSocketBackend::TCPSocketBackend(TCPManager* manager, const NetworkBufferConfig& config, PROTOCOL proto)
     : m_manager(manager)
     , m_general_config(config)
     , m_tcb { .state = State::CLOSED }
@@ -396,7 +406,7 @@ TCPSocket::TCPSocket(TCPManager* manager, const NetworkBufferConfig& config, PRO
     }
 }
 
-bool TCPSocket::Connect(NetworkAddress connected_address, u16 connected_port)
+bool TCPSocketBackend::Connect(NetworkAddress connected_address, u16 connected_port)
 {
     // This call only makes sense in a not yet open socket
     if (getState() != State::CLOSED) {
@@ -404,7 +414,7 @@ bool TCPSocket::Connect(NetworkAddress connected_address, u16 connected_port)
     }
 
     if (m_bound_port == 0) {
-        auto port = m_manager->ReserveEphemeral(this);
+        auto port = m_manager->ReserveEphemeral(shared_from_this());
         if (!port.has_value()) {
             return false;
         }
@@ -413,7 +423,7 @@ bool TCPSocket::Connect(NetworkAddress connected_address, u16 connected_port)
         m_tcp_config.source_port = m_bound_port;
     }
 
-    bool registered = m_manager->RegisterConnection(this, TCPConnection { connected_address, connected_port, m_bound_port });
+    bool registered = m_manager->RegisterConnection(shared_from_this(), TCPConnection { connected_address, connected_port, m_bound_port });
     if (!registered) {
         return false;
     }
@@ -432,13 +442,13 @@ bool TCPSocket::Connect(NetworkAddress connected_address, u16 connected_port)
 
     return true;
 }
-bool TCPSocket::Bind(u16 port)
+bool TCPSocketBackend::Bind(u16 port)
 {
     if (m_bound_port != 0) {
         return false;
     }
 
-    bool res = m_manager->ReservePort(this, port);
+    bool res = m_manager->ReservePort(shared_from_this(), port);
     if (res) {
         m_bound_port = port;
         m_tcp_config.source_port = m_bound_port;
@@ -448,9 +458,9 @@ bool TCPSocket::Bind(u16 port)
 
     return false;
 }
-bool TCPSocket::Listen()
+bool TCPSocketBackend::Listen()
 {
-    bool res = m_manager->RegisterListening(this);
+    bool res = m_manager->RegisterListening(shared_from_this());
 
     if (!res) {
         return false;
@@ -460,11 +470,13 @@ bool TCPSocket::Listen()
 
     return true;
 }
-ErrorOr<std::pair<Socket*, SocketInfo*>> TCPSocket::Accept()
+ErrorOr<std::pair<Socket*, SocketInfo*>> TCPSocketBackend::Accept()
 {
+    // Wait on an accept cv for listening
+
     for (;;) continue;
 }
-ErrorOr<VLBuffer> TCPSocket::Read()
+ErrorOr<VLBuffer> TCPSocketBackend::Read()
 {
     if (m_tcb.state == State::CLOSED) {
         return SocketError::Make(SocketError::Code::ReadFromClosedSocket);
@@ -491,7 +503,7 @@ ErrorOr<VLBuffer> TCPSocket::Read()
 
     return ret;
 }
-u64 TCPSocket::Write(VLBufferView data)
+u64 TCPSocketBackend::Write(VLBufferView data)
 {
     /* Write is the public interface to writing data to the socket. All this function
      * is responsible for is to put data in the write_buffer, and if we can't block
@@ -557,7 +569,7 @@ u64 TCPSocket::Write(VLBufferView data)
     return data_written;
 }
 
-void TCPSocket::WriteImpl_nolock(VLBuffer data)
+void TCPSocketBackend::WriteImpl_nolock(VLBuffer data)
 {
     size_t packet_len = data.Size();
     SendTCPPacket(TCPHeader::PSH | TCPHeader::ACK, data.Copy(), m_tcb.SND.NXT.Get(), m_tcb.RCV.NXT.Get());
@@ -575,7 +587,7 @@ void TCPSocket::WriteImpl_nolock(VLBuffer data)
     m_tcb.SND.NXT += packet_len;
 }
 
-void TCPSocket::DrainWriteBuffer_nolock()
+void TCPSocketBackend::DrainWriteBuffer_nolock()
 {
     if (m_tcb.SND.UNA == m_tcb.SND.NXT && getUsableWindow() >= m_write_buffer.GetUsedLength() && m_write_buffer.GetUsedLength() <= MSS) {
         // Send a packet with <= MSS size if and only if no unacked data and there is window space
@@ -591,12 +603,12 @@ void TCPSocket::DrainWriteBuffer_nolock()
     }
 }
 
-bool TCPSocket::Close()
+bool TCPSocketBackend::Close()
 {
     return Close(false);
 }
 
-bool TCPSocket::Close(bool ignore_already_closing)
+bool TCPSocketBackend::Close(bool ignore_already_closing)
 {
     using enum TCPHeader::Flags;
 
@@ -675,7 +687,7 @@ bool TCPSocket::Close(bool ignore_already_closing)
     return true;
 }
 
-void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connection)
+void TCPSocketBackend::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connection)
 {
     // FIXME: RFC 5961 Recommendations
 
@@ -795,28 +807,28 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
             //       segment does not exactly match the security/compartment in the TCB, then send a reset
             //       and return.
 
-            auto* new_socket = new TCPSocket(m_manager, m_general_config, m_proto);
+            auto new_socket_backend = std::make_shared<TCPSocketBackend>(m_manager, m_general_config, m_proto, Badge<TCPSocketBackend> {});
 
-            m_manager->AlertOpenConnection(this, new_socket, connection);
+            m_manager->AlertOpenConnection(shared_from_this(), new_socket_backend, connection);
 
             // Setup TCB according to spec
-            new_socket->m_tcb.RCV.IRS = header.seq_num.Convert();
-            new_socket->m_tcb.RCV.NXT = header.seq_num + 1;
-            new_socket->m_tcb.RCV.WND = new_socket->m_receive_buffer.RemainingSpace();
-            new_socket->m_tcb.SND.ISS = GenerateISS();
-            new_socket->m_tcb.SND.NXT = new_socket->m_tcb.SND.ISS + 1;
-            new_socket->m_tcb.SND.UNA = new_socket->m_tcb.SND.ISS;
+            new_socket_backend->m_tcb.RCV.IRS = header.seq_num.Convert();
+            new_socket_backend->m_tcb.RCV.NXT = header.seq_num + 1;
+            new_socket_backend->m_tcb.RCV.WND = new_socket_backend->m_receive_buffer.RemainingSpace();
+            new_socket_backend->m_tcb.SND.ISS = GenerateISS();
+            new_socket_backend->m_tcb.SND.NXT = new_socket_backend->m_tcb.SND.ISS + 1;
+            new_socket_backend->m_tcb.SND.UNA = new_socket_backend->m_tcb.SND.ISS;
 
             // Fixme: Fill in information about the connected party
-            new_socket->m_bound_port = m_bound_port;
-            new_socket->m_connected_addr = connection.connected_addr;
-            new_socket->m_connected_port = connection.connected_port;
+            new_socket_backend->m_bound_port = m_bound_port;
+            new_socket_backend->m_connected_addr = connection.connected_addr;
+            new_socket_backend->m_connected_port = connection.connected_port;
 
-            new_socket->m_tcp_config.source_port = m_bound_port;
-            new_socket->m_tcp_config.dest_port = connection.connected_port;
+            new_socket_backend->m_tcp_config.source_port = m_bound_port;
+            new_socket_backend->m_tcp_config.dest_port = connection.connected_port;
 
-            new_socket->SendTCPPacket(SYN | ACK, {}, new_socket->m_tcb.SND.ISS.Get(), new_socket->m_tcb.RCV.NXT.Get());
-            new_socket->m_tcb.state = State::SYN_RCVD;
+            new_socket_backend->SendTCPPacket(SYN | ACK, {}, new_socket_backend->m_tcb.SND.ISS.Get(), new_socket_backend->m_tcb.RCV.NXT.Get());
+            new_socket_backend->m_tcb.state = State::SYN_RCVD;
         } else {
             // Should not be possible to get here, but in this case, drop the packet
             break;
@@ -906,7 +918,7 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
         // Second check the RST bit
         if (header.flags & RST) {
             // If this was initiated via passive OPEN (through LISTEN), close the connection quietly
-            m_manager->Unregister(this);
+            m_manager->Unregister(shared_from_this());
             m_tcb.state = State::CLOSED;
 
             // TODO: Otherwise, close the connection and tell the user connection refused
@@ -929,7 +941,7 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
             // At this point if the SYN bit is sent, it is an error
             // Send a reset
             SendTCPPacket(RST, {});
-            m_manager->Unregister(this);
+            m_manager->Unregister(shared_from_this());
             m_tcb.state = State::CLOSED;
             // TODO: Any outstanding reads or writes should be sent a "reset" response
             break;
@@ -1010,7 +1022,7 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
             }
 
             m_tcb.state = State::CLOSED;
-            m_manager->Unregister(this);
+            m_manager->Unregister(shared_from_this());
             break;
         }
 
@@ -1024,7 +1036,7 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
             SendTCPPacket(RST, {});
 
             m_tcb.state = State::CLOSED;
-            m_manager->Unregister(this);
+            m_manager->Unregister(shared_from_this());
         }
 
         // Fifth, check the ACK bit
@@ -1121,7 +1133,7 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
                     } else if (getState() == State::LAST_ACK) {
                         // If our FIN is acked in this case, then we delete the TCB and close the connection
                         m_tcb.state = State::CLOSED;
-                        m_manager->Unregister(this);
+                        m_manager->Unregister(shared_from_this());
                     }
 
                     m_fin_acked = true;
@@ -1237,7 +1249,7 @@ void TCPSocket::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection connect
     }
 }
 
-bool TCPSocket::ValidateSequenceNumber(size_t segment_length, Modular<u32>& seq_num)
+bool TCPSocketBackend::ValidateSequenceNumber(size_t segment_length, Modular<u32>& seq_num)
 {
     bool valid = false;
 
@@ -1252,7 +1264,7 @@ bool TCPSocket::ValidateSequenceNumber(size_t segment_length, Modular<u32>& seq_
 
     return valid;
 }
-void TCPSocket::SendTCPPacket(u16 flags, std::optional<VLBuffer> maybe_data, u32 seq_num, u32 ack_num)
+void TCPSocketBackend::SendTCPPacket(u16 flags, std::optional<VLBuffer> maybe_data, u32 seq_num, u32 ack_num)
 {
     using enum TCPHeader::Flags;
 
@@ -1285,14 +1297,14 @@ void TCPSocket::SendTCPPacket(u16 flags, std::optional<VLBuffer> maybe_data, u32
     m_manager->SendPacket(std::move(buffer), m_connected_addr);
 }
 
-u32 TCPSocket::GenerateISS()
+u32 TCPSocketBackend::GenerateISS()
 {
     // Fixme: This is what would be considered a worst practice. There is something
     //        in the RFC that says how to handle this
     return random();
 }
 
-void TCPSocket::RTTCallback(Modular<u32> seq_num)
+void TCPSocketBackend::RTTCallback(Modular<u32> seq_num)
 {
     using namespace std::chrono_literals;
     // Steps from RFC 6298
@@ -1343,7 +1355,7 @@ void TCPSocket::RTTCallback(Modular<u32> seq_num)
         [this, transmitted_seq_num]() { RTTCallback(transmitted_seq_num); });
 }
 
-void TCPSocket::EnterTimeWait_nolock()
+void TCPSocketBackend::EnterTimeWait_nolock()
 {
     m_tcb.state = State::TIME_WAIT;
 

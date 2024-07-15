@@ -49,7 +49,7 @@ void TCPManager::HandleIncoming(NetworkBuffer buffer, IPv4Connection ip_connecti
             return;
         }
 
-        auto* socket = m_listening_ports[header.dest_port];
+        auto socket = m_listening_ports[header.dest_port];
         // MAYBE TODO: Refactor the State::Listen to another method, because the connection
         //             arg is only needed there.
         socket->HandleIncomingPacket(std::move(buffer), connection);
@@ -83,7 +83,7 @@ void TCPManager::DumpPacket(NetworkBuffer& buffer, const TCPConnection& connecti
     std::cout << std::dec << std::endl;
 }
 
-bool TCPManager::ReservePort(TCPSocket* socket, u16 port)
+bool TCPManager::ReservePort(std::shared_ptr<TCPSocketBackend> socket, u16 port)
 {
     if (m_ports_in_use.contains(port)) {
         return false;
@@ -92,7 +92,7 @@ bool TCPManager::ReservePort(TCPSocket* socket, u16 port)
     m_ports_in_use[port] = socket;
     return true;
 }
-bool TCPManager::RegisterListening(TCPSocket* socket)
+bool TCPManager::RegisterListening(std::shared_ptr<TCPSocketBackend> socket)
 {
     u16 port = socket->GetPort();
 
@@ -106,7 +106,7 @@ bool TCPManager::RegisterListening(TCPSocket* socket)
 
     return false;
 }
-bool TCPManager::Unregister(TCPSocket* socket)
+bool TCPManager::Unregister(std::shared_ptr<TCPSocketBackend> socket)
 {
     if (m_registered_sockets.contains(socket)) {
         m_registered_sockets.erase(socket);
@@ -134,7 +134,7 @@ bool TCPManager::Unregister(TCPSocket* socket)
 
     return false;
 }
-std::optional<u16> TCPManager::ReserveEphemeral(TCPSocket* socket)
+std::optional<u16> TCPManager::ReserveEphemeral(std::shared_ptr<TCPSocketBackend> socket)
 {
     int i = 0;
 
@@ -154,7 +154,7 @@ std::optional<u16> TCPManager::ReserveEphemeral(TCPSocket* socket)
     return {};
 }
 
-bool TCPManager::AlertOpenConnection(TCPSocket* listening_socket, TCPSocket* new_socket, TCPConnection connection)
+bool TCPManager::AlertOpenConnection(std::shared_ptr<TCPSocketBackend> listening_socket, std::shared_ptr<TCPSocketBackend> new_socket, TCPConnection connection)
 {
     u16 port = listening_socket->GetPort();
     if (m_listening_ports.contains(port) && m_listening_ports[port] == listening_socket
@@ -166,7 +166,7 @@ bool TCPManager::AlertOpenConnection(TCPSocket* listening_socket, TCPSocket* new
 
     return false;
 }
-bool TCPManager::RegisterConnection(TCPSocket* socket, TCPConnection connection)
+bool TCPManager::RegisterConnection(std::shared_ptr<TCPSocketBackend> socket, TCPConnection connection)
 {
     if (m_registered_sockets.contains(socket)) {
         return false;

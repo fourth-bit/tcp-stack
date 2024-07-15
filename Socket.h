@@ -10,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <utility>
 
 #include "./Error.h"
 #include "CircularBuffer.h"
@@ -197,7 +198,7 @@ private:
     UDPSocket* parent { nullptr };
 };
 
-class TCPSocket : public Socket {
+class TCPSocketBackend : public std::enable_shared_from_this<TCPSocketBackend>, Socket {
     friend class TCPManager;
 
     enum class State {
@@ -259,7 +260,8 @@ class TCPSocket : public Socket {
     };
 
 public:
-    TCPSocket(TCPManager*, const NetworkBufferConfig&, PROTOCOL proto, Badge<Socket>);
+    TCPSocketBackend(TCPManager*, const NetworkBufferConfig&, PROTOCOL proto, Badge<Socket>);
+    TCPSocketBackend(TCPManager*, const NetworkBufferConfig&, PROTOCOL proto, Badge<TCPSocketBackend>);
 
     bool Connect(NetworkAddress, u16) override;
     bool Bind(u16) override;
@@ -280,7 +282,7 @@ public:
     u16 GetPort() const { return m_bound_port; }
 
 private:
-    TCPSocket(TCPManager*, const NetworkBufferConfig&, PROTOCOL proto);
+    TCPSocketBackend(TCPManager*, const NetworkBufferConfig&, PROTOCOL proto);
 
     State getState() const { return m_tcb.state; }
     bool ValidateSequenceNumber(size_t segment_length, Modular<u32>& seq_num);
@@ -334,3 +336,27 @@ private:
     std::mutex m_write_lock;
     CircularBuffer m_write_buffer;
 };
+
+class TCPSocket : public Socket {
+    /* This class exists to be a user-managed socket because it must outlive the
+     * user-designated lifetime due to TIME_WAIT */
+
+public:
+    explicit TCPSocket(const std::shared_ptr<TCPSocketBackend>& backend)
+        : m_backend(backend)
+    {
+    }
+
+    // Forward Everything to the backend
+    bool Connect(NetworkAddress addr, u16 port) override { return m_backend->Connect(addr, port); };
+    bool Bind(u16 port) override { return m_backend->Bind(port); };
+    bool Listen() override { return m_backend->Listen(); };
+    ErrorOr<std::pair<Socket*, SocketInfo*>> Accept() override { return m_backend->Accept(); };
+    ErrorOr<VLBuffer> Read() override { return m_backend->Read(); };
+    u64 Write(const VLBufferView buf) override { return m_backend->Write(buf); };
+    bool Close() override { return m_backend->Close(); };
+
+private:
+    std::shared_ptr<TCPSocketBackend> m_backend;
+};
+

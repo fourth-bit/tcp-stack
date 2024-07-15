@@ -56,16 +56,16 @@ public:
     static void DumpPacket(NetworkBuffer&, const TCPConnection&);
 
     // Called during bind to reserve a port
-    bool ReservePort(TCPSocket*, u16 port);
+    bool ReservePort(std::shared_ptr<TCPSocketBackend>, u16 port);
     // Called during connect when there is not a port already chosen, so
     // one is selected automatically
-    std::optional<u16> ReserveEphemeral(TCPSocket*);
+    std::optional<u16> ReserveEphemeral(std::shared_ptr<TCPSocketBackend>);
     // Used to notify the manager that the socket is listening on connections.
-    bool RegisterListening(TCPSocket*);
-    bool RegisterConnection(TCPSocket*, TCPConnection);
+    bool RegisterListening(std::shared_ptr<TCPSocketBackend>);
+    bool RegisterConnection(std::shared_ptr<TCPSocketBackend>, TCPConnection);
     // Used to notify manager that a listening socket has created a connection
-    bool AlertOpenConnection(TCPSocket* listening_socket, TCPSocket* new_socket, TCPConnection);
-    bool Unregister(TCPSocket*);
+    bool AlertOpenConnection(std::shared_ptr<TCPSocketBackend> listening_socket, std::shared_ptr<TCPSocketBackend> new_socket, TCPConnection);
+    bool Unregister(std::shared_ptr<TCPSocketBackend>);
 
     void SendPacket(NetworkBuffer, NetworkAddress);
 
@@ -76,18 +76,18 @@ private:
 
     // Needs to hold objects for each connection (ip/port --> local port)
     // These are the TCBs, the transmission control blocks
-    std::unordered_map<TCPConnection, TCPSocket*, TCPConnectionHasher> m_open_connections {};
+    std::unordered_map<TCPConnection, std::shared_ptr<TCPSocketBackend>, TCPConnectionHasher> m_open_connections {};
 
     // Needs to be aware of listener sockets for new connections
-    std::unordered_map<u16, TCPSocket*> m_listening_ports {};
+    std::unordered_map<u16, std::shared_ptr<TCPSocketBackend>> m_listening_ports {};
 
     // Map of currently used ports, used to quickly figure out ownership when there
     // are no connections
-    std::unordered_map<u16, TCPSocket*> m_ports_in_use {};
+    std::unordered_map<u16, std::shared_ptr<TCPSocketBackend>> m_ports_in_use {};
 
     // Set of registered sockets: Means sockets that are in m_listening_ports
     // or in m_open_connections
-    std::unordered_set<TCPSocket*> m_registered_sockets {};
+    std::unordered_set<std::shared_ptr<TCPSocketBackend>> m_registered_sockets {};
 
     TimerManager m_retransmission_queue;
 
