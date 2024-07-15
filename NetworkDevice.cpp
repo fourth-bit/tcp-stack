@@ -358,6 +358,7 @@ NetworkDevice::~NetworkDevice() noexcept
     u8 data[2] = { 0x01, 0x00 };
     write(m_thread_notify_fd, data, 2);
     bool res = fragment_timeout.request_stop();
+    m_fragment_timeout_cv.notify_all();
 
     if (listen_thread.joinable()) {
         listen_thread.join();
@@ -622,6 +623,7 @@ void NetworkDevice::ResolveIPv4(NetworkBuffer& buffer, EthernetConnection& eth_c
             IPv4FragmentID id { header.id, IPv4Address(header.source_ip) };
 
             fragment_timeout_queue.emplace_back(std::chrono::steady_clock::now() + fragment_timeout_time, id);
+            m_fragment_timeout_cv.notify_one();
             // FIXME: delete pls
             //  auto [new_it, inserted] = m_ip_fragments.insert({ id, IPv4Fragments(header.total_length, --fragment_timeout_queue.end()) });
             auto [new_it, inserted] = m_ip_fragments.emplace(id, IPv4Fragments(header.total_length, --fragment_timeout_queue.end()));
@@ -853,22 +855,31 @@ std::optional<EthernetMAC> NetworkDevice::SendArp(IPv4Address target)
     return {};
 }
 
-void NetworkDevice::IPTimeoutFunction()
+void NetworkDevice::IPTimeoutFunction(std::stop_token token)
 {
-    for (;;) {
+    while (!token.stop_requested()) {
+        std::unique_lock lock (m_fragment_mutex);
+
         if (!fragment_timeout_queue.empty()) {
-            std::this_thread::sleep_until(fragment_timeout_queue.front().first);
+             m_fragment_timeout_cv.wait_until(
+                lock,
+                fragment_timeout_queue.front().first);
+        } else {
+            m_fragment_timeout_cv.wait(lock, [this, &token]() { return token.stop_requested() || !fragment_timeout_queue.empty(); });
+        }
 
-            auto now = std::chrono::steady_clock::now();
-            for (auto it = fragment_timeout_queue.begin(); it != fragment_timeout_queue.end();) {
-                if (it->first > now) {
-                    break;
-                }
+        if (token.stop_requested()) {
+            break;
+        }
 
-                std::scoped_lock lock(m_fragment_mutex);
-                m_ip_fragments.erase(it->second);
-                it = fragment_timeout_queue.erase(it);
+        auto now = std::chrono::steady_clock::now();
+        for (auto it = fragment_timeout_queue.begin(); it != fragment_timeout_queue.end();) {
+            if (it->first > now) {
+                break;
             }
+
+            m_ip_fragments.erase(it->second);
+            it = fragment_timeout_queue.erase(it);
         }
     }
 }

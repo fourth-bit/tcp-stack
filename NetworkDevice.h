@@ -150,7 +150,7 @@ private:
     void ResolveARP(NetworkBuffer&, EthernetConnection&);
     void ResolveIPv4(NetworkBuffer&, EthernetConnection&);
 
-    [[noreturn]] void IPTimeoutFunction();
+    void IPTimeoutFunction(std::stop_token);
 
     struct Route {
         EthernetMAC dest_mac;
@@ -178,6 +178,7 @@ private:
 
     // TODO: Make class for IPv4/6
     std::mutex m_fragment_mutex;
+    std::condition_variable m_fragment_timeout_cv;
     std::unordered_map<IPv4FragmentID, IPv4Fragments> m_ip_fragments;
     std::list<std::pair<std::chrono::steady_clock::time_point, IPv4FragmentID>> fragment_timeout_queue {};
 
