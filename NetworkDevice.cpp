@@ -261,7 +261,6 @@ NetworkDevice::NetworkDevice(EthernetMAC mac_address,
     , udpManager(this)
     , tcpManager(this)
     , MTU(mtu)
-    , fragment_timeout([this]() { IPTimeoutFunction(); })
     , m_arp_buffer_config()
 {
     // Fixme: Refactor to a factory
@@ -340,11 +339,57 @@ NetworkDevice::NetworkDevice(EthernetMAC mac_address,
     ip4_config.src_ip = ip_addr;
     m_default_ip4_config.AddLayer<LayerType::Ethernet>(eth_config);
     m_default_ip4_config.AddLayer<LayerType::IPv4>(ip4_config);
+
+    // Setup A Wakeup for the fragment timeout and listen functions for the
+    // (eventual) destructor
+
+    int fds[2];
+    pipe(fds);
+
+    m_thread_notify_fd = fds[1];
+    m_thread_wakeup_fd = fds[0];
+
+    listen_thread = std::thread([this]() { Listen(); });
+    fragment_timeout = std::jthread([this](std::stop_token token) { IPTimeoutFunction(token); });
+}
+
+NetworkDevice::~NetworkDevice() noexcept
+{
+    u8 data[2] = { 0x01, 0x00 };
+    write(m_thread_notify_fd, data, 2);
+    bool res = fragment_timeout.request_stop();
+
+    if (listen_thread.joinable()) {
+        listen_thread.join();
+    }
+
+    if (fragment_timeout.joinable()) {
+        fragment_timeout.join();
+    }
 }
 
 void NetworkDevice::Listen()
 {
+    fd_set master_read_fds;
+
+    FD_ZERO(&master_read_fds);
+    FD_SET(tun_fd, &master_read_fds);
+    FD_SET(m_thread_wakeup_fd, &master_read_fds);
+
+    timeval tv { 0, 0 };
+
+    int max_fd = std::max(tun_fd, m_thread_wakeup_fd);
+
     for (;;) {
+        fd_set read_fds = master_read_fds;
+        int num_sockets = select(max_fd + 1, &read_fds, nullptr, nullptr, nullptr);
+
+        if (num_sockets < 1) {
+            continue;
+        } else if (FD_ISSET(m_thread_wakeup_fd, &read_fds)) {
+            break;
+        }
+
         // MTU does not consider the ethernet header and one for null terminator
         auto buffer = VLBuffer::WithSize(MTU + sizeof(EthernetHeader) + 1);
         // auto buffer = VLBuffer::WithSize(2000);

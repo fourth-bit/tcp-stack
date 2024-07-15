@@ -118,6 +118,7 @@ public:
         u8 subnet,
         IPv4Address router,
         size_t MTU = 1500);
+    ~NetworkDevice() noexcept;
 
     void Listen();
 
@@ -159,6 +160,8 @@ private:
     static std::optional<Route> MakeRoutingDecision(IPv4Address);
 
     int tun_fd;
+    int m_thread_notify_fd;
+    int m_thread_wakeup_fd;
 
     size_t MTU;
     IPv4Address ip;
@@ -177,13 +180,16 @@ private:
     std::mutex m_fragment_mutex;
     std::unordered_map<IPv4FragmentID, IPv4Fragments> m_ip_fragments;
     std::list<std::pair<std::chrono::steady_clock::time_point, IPv4FragmentID>> fragment_timeout_queue {};
-    std::thread fragment_timeout;
+
+    std::thread listen_thread;
 
     static constexpr std::chrono::milliseconds fragment_timeout_time { 5000 };
 
     ICMPManager icmpManager;
     UDPManager udpManager;
     TCPManager tcpManager;
+
+    std::jthread fragment_timeout;
 };
 
 extern std::unique_ptr<NetworkDevice> the_net_dev;

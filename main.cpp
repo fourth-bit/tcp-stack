@@ -52,8 +52,6 @@ void runNewCustomClient()
         16,
         IPv4Address::FromString("172.18.0.1").value());
 
-    // Use another thread so we can continue here
-    std::thread th([&]() { the_net_dev->Listen(); });
 
     std::cout << IPv4Address(ip_address) << std::endl;
 
@@ -99,9 +97,6 @@ void runNewCustomClient()
             auto* error = dynamic_cast<SocketError*>(maybe_error.GetError());
             std::cerr << "Could not accept from socket. Code: " << (int)error->code << std::endl;
 
-            if (th.joinable()) {
-                th.join();
-            }
             return;
         }
 
@@ -142,10 +137,6 @@ void runNewCustomClient()
         do {
             written += subsocket->Write(view.SubBuffer(written));
         } while (written != buffer.Size());
-    }
-
-    if (th.joinable()) {
-        th.join();
     }
 }
 
