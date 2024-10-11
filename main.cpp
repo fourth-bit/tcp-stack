@@ -66,6 +66,8 @@ void runNewCustomClient()
 
     std::unique_ptr<TCPSocket> sock(dynamic_cast<TCPSocket*>(Socket::Create(PROTOCOL::INTERNET, SOCK_TYPE::STREAM)));
     sock->Bind(1000);
+
+#if 0
     auto maybe_target = IPv4Address::FromString("172.18.0.2");
     if (!maybe_target.has_value()) {
         std::cerr << "IPv4Address not well-formed" << std::endl;
@@ -88,34 +90,40 @@ void runNewCustomClient()
         sock->Close();
         return;
     }
-    // sock->Listen();
+#elif 1
+    sock->Listen();
+
+    auto maybe_error = sock->Accept();
+    if (maybe_error.IsError()) {
+        auto* error = dynamic_cast<SocketError*>(maybe_error.GetError());
+        std::cerr << "Could not accept from socket. Code: " << (int)error->code << std::endl;
+
+        return;
+    }
+
+    auto result = maybe_error.GetResult();
+
+    auto subsocket = std::unique_ptr<Socket>(result.first);
+    auto info = std::unique_ptr<SocketInfo>(result.second);
 
     for (;;) {
-        auto maybe_error = sock->Accept();
-        if (maybe_error.IsError()) {
-            auto* error = dynamic_cast<SocketError*>(maybe_error.GetError());
-            std::cerr << "Could not accept from socket. Code: " << (int)error->code << std::endl;
-
-            return;
-        }
-
-        auto result = maybe_error.GetResult();
-
-        auto subsocket = std::unique_ptr<Socket>(result.first);
-        auto info = std::unique_ptr<SocketInfo>(result.second);
-
         auto maybe_read_error = subsocket->Read();
         if (maybe_read_error.IsError()) {
-            auto* error = dynamic_cast<SocketError*>(maybe_error.GetError());
+            auto* error = dynamic_cast<SocketError*>(maybe_read_error.GetError());
+            if (error->code == SocketError::Code::ConnectionClosing) {
+                // We will close when the remote closes
+                break;
+            }
+
             std::cerr << "Could not read from subsocket. Code: " << (int)error->code << std::endl;
-            continue;
+            return;
         }
         auto& buffer = maybe_read_error.GetResult();
 
         auto* info_raw = dynamic_cast<PortSocketInfo*>(info.get());
         if (info_raw == nullptr) {
             std::cerr << "Unexpected Socket Info Type" << std::endl;
-            continue;
+            return;
         }
 
         auto [network_addr, port] = *info_raw;
@@ -137,6 +145,10 @@ void runNewCustomClient()
             written += subsocket->Write(view.SubBuffer(written));
         } while (written != buffer.Size());
     }
+
+    subsocket->Close();
+    sock->Close();
+#endif
 }
 
 int main()
@@ -262,7 +274,7 @@ int main()
 #else
     runNewCustomClient();
 
-    std::this_thread::sleep_for(std::chrono::seconds(5));
+    std::this_thread::sleep_for(std::chrono::seconds(10));
 
     return 0;
 #endif

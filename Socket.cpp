@@ -472,9 +472,26 @@ bool TCPSocketBackend::Listen()
 }
 ErrorOr<std::pair<Socket*, SocketInfo*>> TCPSocketBackend::Accept()
 {
-    // Wait on an accept cv for listening
+    if (m_tcb.state != State::LISTEN) {
+        return SocketError::Make(SocketError::Code::AcceptOnNonListeningSocket);
+    }
 
-    for (;;) continue;
+    std::unique_lock lock1(m_accept_queue);
+
+    std::unique_lock lock2(m_accept_lock);
+    if (m_accept_backlog.empty()) {
+        m_accept_cv.wait(lock2, [this]() { return !m_accept_backlog.empty(); });
+    }
+
+    TCPSocket* socket = m_accept_backlog.front().release();
+    m_accept_backlog.pop_front();
+
+    SocketInfo* info = new PortSocketInfo {
+        socket->m_backend->m_connected_addr,
+        socket->m_backend->m_connected_port,
+    };
+
+    return { { dynamic_cast<Socket*>(socket), info } };
 }
 ErrorOr<VLBuffer> TCPSocketBackend::Read()
 {
@@ -809,8 +826,6 @@ void TCPSocketBackend::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection 
 
             auto new_socket_backend = std::make_shared<TCPSocketBackend>(m_manager, m_general_config, m_proto, Badge<TCPSocketBackend> {});
 
-            m_manager->AlertOpenConnection(shared_from_this(), new_socket_backend, connection);
-
             // Setup TCB according to spec
             new_socket_backend->m_tcb.RCV.IRS = header.seq_num.Convert();
             new_socket_backend->m_tcb.RCV.NXT = header.seq_num + 1;
@@ -827,8 +842,15 @@ void TCPSocketBackend::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection 
             new_socket_backend->m_tcp_config.source_port = m_bound_port;
             new_socket_backend->m_tcp_config.dest_port = connection.connected_port;
 
+            m_manager->AlertOpenConnection(shared_from_this(), new_socket_backend, connection);
+
             new_socket_backend->SendTCPPacket(SYN | ACK, {}, new_socket_backend->m_tcb.SND.ISS.Get(), new_socket_backend->m_tcb.RCV.NXT.Get());
             new_socket_backend->m_tcb.state = State::SYN_RCVD;
+
+            std::unique_lock lk (m_accept_lock);
+            m_accept_backlog.push_back(std::make_unique<TCPSocket>(new_socket_backend));
+            lk.unlock();
+            m_accept_cv.notify_one();
         } else {
             // Should not be possible to get here, but in this case, drop the packet
             break;
