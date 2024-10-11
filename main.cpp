@@ -6,6 +6,7 @@
 
 #include <iostream>
 #include <unordered_map>
+#include <sstream>
 
 #include <linux/if.h>
 #include <thread>
@@ -16,7 +17,7 @@
 
 std::unique_ptr<NetworkDevice> the_net_dev;
 
-void runNewCustomClient()
+void initialize_net_dev()
 {
     using namespace std::chrono_literals;
 
@@ -63,34 +64,57 @@ void runNewCustomClient()
     //            std::cout << "Ping (" << i << ") failed" << std::endl;
     //        }
     //    }
+}
 
+void run_tcp_connection(NetworkAddress target, u16 port)
+{
     std::unique_ptr<TCPSocket> sock(dynamic_cast<TCPSocket*>(Socket::Create(PROTOCOL::INTERNET, SOCK_TYPE::STREAM)));
-    sock->Bind(1000);
 
-#if 0
-    auto maybe_target = IPv4Address::FromString("172.18.0.2");
-    if (!maybe_target.has_value()) {
-        std::cerr << "IPv4Address not well-formed" << std::endl;
-        return;
-    }
-    sock->Connect(NetworkAddress(maybe_target.value()), 1000);
-    for (;;) {
-        auto maybe_buffer = sock->Read();
-        if (maybe_buffer.IsError()) {
-            std::cout << "Error in Read " << maybe_buffer.GetError()->ToString() << std::endl;
-            continue;
+    sock->Connect(target, port);
+
+    std::stringstream ss;
+    ss << "Hello " << target << ":" << port << "\n";
+    std::string data = ss.str();
+
+    // Place message in VLBuffer
+    VLBuffer payload = VLBuffer::WithSize(data.size());
+    std::copy(data.begin(), data.end(), payload.Data());
+
+    u64 written = 0;
+    do {
+        written += sock->Write(payload.AsView().SubBuffer(written));
+    } while (written != payload.Size());
+
+    auto maybe_read_error = sock->Read();
+    if (maybe_read_error.IsError()) {
+        auto* error = dynamic_cast<SocketError*>(maybe_read_error.GetError());
+        if (error->code == SocketError::Code::ConnectionClosing) {
+            sock->Close();
+            return;
         }
 
-        maybe_buffer.GetResult().Hexdump();
-
-        auto buffer = std::move(maybe_buffer.GetResult());
-
-        sock->Write(buffer.AsView());
-
-        sock->Close();
+        std::cerr << "Could not read from subsocket. Code: " << (int)error->code << std::endl;
         return;
     }
-#elif 1
+    auto& buffer = maybe_read_error.GetResult();
+
+    for (size_t i = 0; i < buffer.Size(); i++) {
+        std::cout << buffer[i];
+    }
+    if (buffer.Size() && buffer[buffer.Size() - 1] != '\n') {
+        std::cout << std::endl;
+    } else {
+        std::cout << std::flush;
+    }
+
+    sock->Close();
+}
+
+void run_tcp_echo_server(u16 incoming_port)
+{
+    std::unique_ptr<TCPSocket> sock(dynamic_cast<TCPSocket*>(Socket::Create(PROTOCOL::INTERNET, SOCK_TYPE::STREAM)));
+    sock->Bind(incoming_port);
+
     sock->Listen();
 
     auto maybe_error = sock->Accept();
@@ -148,7 +172,6 @@ void runNewCustomClient()
 
     subsocket->Close();
     sock->Close();
-#endif
 }
 
 int main()
@@ -272,8 +295,12 @@ int main()
     std::this_thread::sleep_for(1s);
 
 #else
-    runNewCustomClient();
+    initialize_net_dev();
 
+    // run_tcp_echo_server(1000);
+    run_tcp_connection({ IPv4Address::FromString("172.18.0.2").value() }, 1000);
+
+    // Give the program time to clean up
     std::this_thread::sleep_for(std::chrono::seconds(10));
 
     return 0;

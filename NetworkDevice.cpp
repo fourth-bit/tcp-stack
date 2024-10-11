@@ -77,7 +77,6 @@ static int make_packet_socket(std::string device)
     }
 
     int index = ifr.ifr_ifindex;
-    std::cout << index << '\n';
 
     struct sockaddr_ll sll { };
 
