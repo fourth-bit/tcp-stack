@@ -335,7 +335,7 @@ class TCPSocketBackend : public std::enable_shared_from_this<TCPSocketBackend>, 
 public:
     TCPSocketBackend(TCPManager*, const NetworkBufferConfig&, PROTOCOL proto, Badge<Socket>);
     TCPSocketBackend(TCPManager*, const NetworkBufferConfig&, PROTOCOL proto, Badge<TCPSocketBackend>);
-    ~TCPSocketBackend() {
+    ~TCPSocketBackend() override {
 #ifdef DEBUG_TCP
         std::cout << "killing tcp backend" << std::endl;
 #endif
@@ -391,7 +391,6 @@ private:
 
     std::mutex m_read_buffer_lock;
     CircularBuffer m_receive_buffer;
-    size_t current_read_size { 0 };
     std::condition_variable m_read_cv;
 
     Modular<u32> m_fin_number { 0 };

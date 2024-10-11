@@ -508,15 +508,14 @@ ErrorOr<VLBuffer> TCPSocketBackend::Read()
     std::unique_lock lock2(m_read_buffer_lock);
 
     m_read_cv.wait(lock2, [this]() {
-        return current_read_size != 0 || m_remote_closing;
+        return m_receive_buffer.GetUsedLength() != 0 || m_remote_closing;
     });
 
-    if (current_read_size == 0 && m_remote_closing) {
+    if (m_receive_buffer.GetUsedLength() == 0 && m_remote_closing) {
         return SocketError::Make(SocketError::Code::ConnectionClosing);
     }
 
-    auto ret = m_receive_buffer.Read(current_read_size);
-    current_read_size = 0;
+    auto ret = m_receive_buffer.Read(m_receive_buffer.GetUsedLength());
 
     return ret;
 }
@@ -1214,14 +1213,8 @@ void TCPSocketBackend::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection 
                     // TODO: Delay ACKs if necessary
                     SendTCPPacket(ACK, {}, m_tcb.SND.NXT.Get(), m_tcb.RCV.NXT.Get());
 
-                    if (header.flags & PSH) {
-                        // FIXME: THIS BEHAVIOR IS WRONG, and correct behavior in FIN
-                        // Update the current_read_size
-                        current_read_size = m_receive_buffer.GetUsedLength();
-
-                        // Allow a waiting thread to read
-                        m_read_cv.notify_one();
-                    }
+                    // Allow a waiting thread to read
+                    m_read_cv.notify_one();
                 }
             }
         }
@@ -1253,8 +1246,6 @@ void TCPSocketBackend::HandleIncomingPacket(NetworkBuffer buffer, TCPConnection 
                 break;
             }
 
-            // Fixme: Fix when we correct the way that PSH works above
-            current_read_size = m_receive_buffer.GetUsedLength();
             m_remote_closing = true;
             m_read_cv.notify_all();
         }
