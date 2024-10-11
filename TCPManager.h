@@ -19,6 +19,7 @@ class NetworkDevice;
 struct TCPHeader;
 
 #define DEBUG_TCP
+#undef DEBUG_TCP
 
 struct TCPConnection {
     NetworkAddress connected_addr;

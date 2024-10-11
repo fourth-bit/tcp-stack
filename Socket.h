@@ -11,6 +11,7 @@
 #include <optional>
 #include <queue>
 #include <utility>
+#include <iostream>
 
 #include "./Error.h"
 #include "CircularBuffer.h"
@@ -22,6 +23,8 @@
 #include "NetworkBuffer.h"
 #include "Utils.h"
 #include "VLBuffer.h"
+
+#define DEBUG_TCP_STATE
 
 class UDPManager;
 class TCPManager;
@@ -37,6 +40,8 @@ enum class SOCK_TYPE {
     DATAGRAM,
     RAW
 };
+
+class TCPSocket;
 
 u8 socktype_to_ipproto(SOCK_TYPE);
 
@@ -201,18 +206,86 @@ private:
 class TCPSocketBackend : public std::enable_shared_from_this<TCPSocketBackend>, Socket {
     friend class TCPManager;
 
+#ifdef DEBUG_TCP_STATE
+    class State {
+    public:
+        enum Internal {
+#else
     enum class State {
-        CLOSED,
-        LISTEN,
-        SYN_SENT,
-        SYN_RCVD,
-        ESTABLISHED,
-        CLOSE_WAIT,
-        LAST_ACK,
-        FIN_WAIT_1,
-        FIN_WAIT_2,
-        CLOSING,
-        TIME_WAIT,
+#endif
+
+            CLOSED,
+            LISTEN,
+            SYN_SENT,
+            SYN_RCVD,
+            ESTABLISHED,
+            CLOSE_WAIT,
+            LAST_ACK,
+            FIN_WAIT_1,
+            FIN_WAIT_2,
+            CLOSING,
+            TIME_WAIT,
+#ifdef DEBUG_TCP_STATE
+        } internal;
+
+        const char* ToStr(const Internal& internal)
+        {
+            switch(internal) {
+            case CLOSED:
+                return "CLOSED";
+            case LISTEN:
+                return "LISTEN";
+            case SYN_SENT:
+                return "SYN_SENT";
+            case SYN_RCVD:
+                return "SYN_RCVD";
+            case ESTABLISHED:
+                return "ESTABLISHED";
+            case CLOSE_WAIT:
+                return "CLOSE_WAIT";
+            case LAST_ACK:
+                return "LAST_ACK";
+            case FIN_WAIT_1:
+                return "FIN_WAIT_1";
+            case FIN_WAIT_2:
+                return "FIN_WAIT_2";
+            case CLOSING:
+                return "CLOSING";
+            case TIME_WAIT:
+                return "TIME_WAIT";
+            }
+        }
+
+        State& operator=(const State& rhs)
+        {
+            std::cout << "TCP State Transition: " << ToStr(internal) << " -> " << ToStr(rhs.internal) << std::endl;
+            internal = rhs.internal;
+            return *this;
+        }
+
+        State& operator=(const Internal& rhs)
+        {
+            std::cout << "TCP State Transition: " << ToStr(internal) << " -> " << ToStr(rhs) << std::endl;
+            internal = rhs;
+            return *this;
+        }
+
+        bool operator==(const Internal& rhs) const
+        {
+            return internal == rhs;
+        }
+
+        bool operator==(const State& other) const
+        {
+            return internal == other.internal;
+        }
+
+        operator int () const
+        {
+            return internal;
+        }
+
+#endif
     };
 
     struct TCB {
@@ -262,6 +335,11 @@ class TCPSocketBackend : public std::enable_shared_from_this<TCPSocketBackend>, 
 public:
     TCPSocketBackend(TCPManager*, const NetworkBufferConfig&, PROTOCOL proto, Badge<Socket>);
     TCPSocketBackend(TCPManager*, const NetworkBufferConfig&, PROTOCOL proto, Badge<TCPSocketBackend>);
+    ~TCPSocketBackend() {
+#ifdef DEBUG_TCP
+        std::cout << "killing tcp backend" << std::endl;
+#endif
+    }
 
     bool Connect(NetworkAddress, u16) override;
     bool Bind(u16) override;
@@ -335,9 +413,15 @@ private:
     // Locks everything related to writing data: retransmission queue, nagle queue, etc.
     std::mutex m_write_lock;
     CircularBuffer m_write_buffer;
+
+    FIFOLock m_accept_queue;
+    std::mutex m_accept_lock;
+    std::condition_variable m_accept_cv;
+    std::list<std::unique_ptr<TCPSocket>> m_accept_backlog;
 };
 
 class TCPSocket : public Socket {
+    friend class TCPSocketBackend;
     /* This class exists to be a user-managed socket because it must outlive the
      * user-designated lifetime due to TIME_WAIT */
 

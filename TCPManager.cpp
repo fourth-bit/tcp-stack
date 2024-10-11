@@ -70,6 +70,31 @@ void TCPManager::DumpPacket(NetworkBuffer& buffer, const TCPConnection& connecti
         return;
     }
 
+    std::cout << "SEQ Number: " << tcp->GetHeader().seq_num.Convert() << std::endl;
+    std::cout << "ACK Number: " << tcp->GetHeader().ack_num.Convert() << std::endl;
+    std::cout << "Flags:";
+
+    if (tcp->GetHeader().flags & TCPHeader::SYN) {
+        std::cout << " SYN";
+    }
+    if (tcp->GetHeader().flags & TCPHeader::ACK) {
+        std::cout << " ACK";
+    }
+    if (tcp->GetHeader().flags & TCPHeader::PSH) {
+        std::cout << " PSH";
+    }
+    if (tcp->GetHeader().flags & TCPHeader::RST) {
+        std::cout << " RST";
+    }
+    if (tcp->GetHeader().flags & TCPHeader::FIN) {
+        std::cout << " FIN";
+    }
+    if (tcp->GetHeader().flags & TCPHeader::URG) {
+        std::cout << " URG";
+    }
+    std::cout << std::endl;
+
+
     size_t packet_size = tcp->Size() + buffer.GetPayload().Size();
     u8* data = tcp->Data();
     std::cout << std::hex;

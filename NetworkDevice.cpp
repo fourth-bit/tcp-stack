@@ -323,7 +323,6 @@ NetworkDevice::NetworkDevice(EthernetMAC mac_address,
 #endif
 
     ip = ip_addr;
-    std::cout << ip << std::endl;
     subnet_mask = SubnetMask(subnet);
 
     EthernetLayer::Config eth_config {};
@@ -683,7 +682,13 @@ void NetworkDevice::SendIPv4(NetworkBuffer buffer, IPv4Address target, IPv4Heade
     buffer.RemoveLayersAbove(ipv4layer);
 
     auto maybe_route = MakeRoutingDecision(target);
-    if (!maybe_route) {
+    int attempts = 0;
+    while (!maybe_route.has_value() && attempts < 10) {
+        maybe_route = MakeRoutingDecision(target);
+        attempts++;
+    }
+    if (attempts == 10) {
+        // Could not figure out which MAC address to send our packet to
         return;
     }
 
@@ -838,7 +843,7 @@ std::optional<EthernetMAC> NetworkDevice::SendArp(IPv4Address target)
     for (int i = 0; i < 5; i++) {
         SendEthernet(buf.Copy(), connection.destination_mac, ETH_P_ARP);
 
-        auto status = future.wait_for(100ms);
+        auto status = future.wait_for(1s);
 
         m_arp_wait_map.erase(target);
 
