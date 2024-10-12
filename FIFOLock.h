@@ -17,6 +17,6 @@ public:
 private:
     std::mutex m_mutex;
     std::condition_variable cv;
-    size_t m_ticket_head, m_ticket_tail { 0 };
+    size_t m_ticket_head { 0 }, m_ticket_tail { 0 };
     bool locked;
 };
