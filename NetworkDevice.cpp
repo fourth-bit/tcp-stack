@@ -680,13 +680,20 @@ void NetworkDevice::SendIPv4(NetworkBuffer buffer, IPv4Address target, IPv4Heade
     }
     buffer.RemoveLayersAbove(ipv4layer);
 
-    auto maybe_route = MakeRoutingDecision(target);
-    int attempts = 0;
-    while (!maybe_route.has_value() && attempts < 10) {
-        maybe_route = MakeRoutingDecision(target);
-        attempts++;
+    // MakeRoutingDecision can block in this case. This is bad in the listen thread as we cannot block
+    // for any reason, so dispatch the call to another thread
+    if (std::this_thread::get_id() == listen_thread.get_id() && !arp_translation_table.contains(target.GetAddress())) {
+        // This is wasteful and dangerous, as the thread cannot be reliably destroyed before the program
+        // ends. But, this case is incredibly rare (we have a hit on this when we get a packet from an IP
+        // address, but we don't know the MAC address while in the listen thread). The only known case of
+        // this being triggered is the start of an incoming TCP connection. This means it's passable.
+        auto th = std::thread([moved_buffer = std::move(buffer), target, proto_type, this]() mutable { SendIPv4(std::move(moved_buffer), target, proto_type); });
+        th.detach();
+        return;
     }
-    if (attempts == 10) {
+
+    auto maybe_route = MakeRoutingDecision(target);
+    if (!maybe_route.has_value()) {
         // Could not figure out which MAC address to send our packet to
         return;
     }
@@ -862,10 +869,10 @@ std::optional<EthernetMAC> NetworkDevice::SendArp(IPv4Address target)
 void NetworkDevice::IPTimeoutFunction(std::stop_token token)
 {
     while (!token.stop_requested()) {
-        std::unique_lock lock (m_fragment_mutex);
+        std::unique_lock lock(m_fragment_mutex);
 
         if (!fragment_timeout_queue.empty()) {
-             m_fragment_timeout_cv.wait_until(
+            m_fragment_timeout_cv.wait_until(
                 lock,
                 fragment_timeout_queue.front().first);
         } else {
