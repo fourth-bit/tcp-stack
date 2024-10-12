@@ -93,9 +93,9 @@ std::string IPv4Address::ToString() const
     std::stringstream ss;
     u32 h_address = m_address;
     ss << (h_address >> 24) << '.'
-       << (h_address & 0x0F00 >> 16) << '.'
-       << (h_address & 0x00F0 >> 8) << '.'
-       << (h_address & 0x000F);
+       << ((h_address & 0x00FF0000) >> 16) << '.'
+       << ((h_address & 0x0000FF00) >> 8) << '.'
+       << (h_address & 0x000000FF);
 
     return ss.str();
 }
