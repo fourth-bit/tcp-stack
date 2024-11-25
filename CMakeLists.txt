@@ -19,4 +19,5 @@ add_executable(TCP
         TCPManager.cpp
         CircularBuffer.cpp
         FIFOLock.cpp
-        TimerManager.cpp)
+        TimerManager.cpp
+        IPv6Address.cpp)

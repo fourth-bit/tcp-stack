@@ -439,6 +439,12 @@ void NetworkDevice::Listen()
 #endif
             ResolveIPv4(layered_buffer, connection);
             break;
+        case ETH_P_IPV6:
+#ifdef DEBUG_TRACE_PACKETS
+            std::cout << "Resolving IPv4" << std::endl;
+#endif
+            ResolveIPv6(layered_buffer, connection);
+            break;
         default:
             break;
         }
@@ -917,4 +923,9 @@ IPv4Connection NetworkDevice::FlipConnection(const IPv4Connection& other)
     };
 
     return flipped;
+}
+
+void NetworkDevice::ResolveIPv6(NetworkBuffer& buffer, EthernetConnection& connection)
+{
+
 }

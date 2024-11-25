@@ -149,6 +149,7 @@ public:
 private:
     void ResolveARP(NetworkBuffer&, EthernetConnection&);
     void ResolveIPv4(NetworkBuffer&, EthernetConnection&);
+    void ResolveIPv6(NetworkBuffer&, EthernetConnection&);
 
     void IPTimeoutFunction(std::stop_token);
 

@@ -8,6 +8,7 @@
 #include "IntDefs.h"
 #include "NetworkOrder.h"
 #include "VLBuffer.h"
+#include "IPv6Address.h"
 
 struct EthernetConnection;
 struct IPv4Connection;
@@ -93,6 +94,17 @@ struct IPv4Header {
     void SetFragmentOffset(u16);
 
     bool IsFragment() const { return (GetFlags() & MoreFragments) || GetFragmentOffset() != 0; }
+} __attribute__((packed));
+
+struct IPv6Header {
+    u32 flow_label : 20;
+    u32 traffic_class : 8;
+    u32 version : 4;
+    NetworkOrdered<u16> payload_length;
+    u8 next_header;
+    u8 hop_limit;
+    NetworkIPv6Address source_ip;
+    NetworkIPv6Address dest_ip;
 } __attribute__((packed));
 
 struct ICMPv4Header {

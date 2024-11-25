@@ -140,6 +140,15 @@ public:
     void SetFragmentOffset(u16 flags);
     void SetID(u16 id);
 };
+class IPv6Layer : public NetworkLayer {
+public:
+    struct Config : NetworkLayer::Config {
+        size_t LayerSize() override { return sizeof(IPv6Header);}
+        void ConfigureLayer(NetworkLayer&) override;
+    };
+
+    IPv6Header& GetHeader();
+};
 class ICMPLayer : public NetworkLayer {
 public:
     struct Config : NetworkLayer::Config {
@@ -224,7 +233,7 @@ struct LayerTypeToClass<LayerType::ICMP> {
 };
 template <>
 struct LayerTypeToClass<LayerType::IPv6> {
-    // using type = ICMPLayer;
+    using type = IPv6Layer;
 };
 template <>
 struct LayerTypeToClass<LayerType::TCP> {

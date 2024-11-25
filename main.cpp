@@ -3,13 +3,14 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <linux/if.h>
+#include <ifaddrs.h>
 
 #include <iostream>
 #include <unordered_map>
 #include <sstream>
-
-#include <linux/if.h>
 #include <thread>
+
 
 #include "NetworkDevice.h"
 #include "NetworkOrder.h"
@@ -294,14 +295,47 @@ int main()
 
     std::this_thread::sleep_for(1s);
 
+#elif 1
+    ifaddrs* ifas;
+    if (getifaddrs(&ifas) != 0) {
+        perror("getifaddrs");
+        return 1;
+    }
+
+    // Traverse it as a linked list
+    for (ifaddrs* ifa = ifas; ifa != nullptr; ifa = ifa->ifa_next) {
+        // Only look at the eth0 device
+        if (strcmp(ifa->ifa_name, "eth0") == 0) {
+            int family = ifa->ifa_addr->sa_family;
+
+            if (family == AF_INET) {
+                auto* ipaddr = (sockaddr_in*)ifa->ifa_addr;
+                auto ip_address = NetworkOrdered<u32>::WithNetworkOrder(ipaddr->sin_addr.s_addr);
+                auto ip4 = IPv4Address(ip_address);
+                std::cout << "IPv4: " << ip4 << std::endl;
+            } else if (family == AF_INET6) {
+                auto* ip6_sockaddr = (sockaddr_in6*)ifa->ifa_addr;
+                if (ip6_sockaddr->sin6_scope_id == 0) {
+                    auto* ip6_out = &ip6_sockaddr->sin6_addr;
+                    auto* ip6_network = reinterpret_cast<NetworkIPv6Address*>(ip6_out);
+                    IPv6Address ip6(*ip6_network);
+                    std::cout << "IPv6: " << ip6 << std::endl;
+                }
+            }
+        }
+    }
+
+    freeifaddrs(ifas);
+
+    return 0;
 #else
     initialize_net_dev();
 
-    // run_tcp_echo_server(1000);
-    run_tcp_connection({ IPv4Address::FromString("172.18.0.2").value() }, 1000);
+//    run_tcp_echo_server(1000);
+    run_tcp_connection({ IPv4Address::FromString("172.18.0.3").value() }, 1000);
 
     // Give the program time to clean up
-    std::this_thread::sleep_for(std::chrono::seconds(10));
+    std::this_thread::sleep_for(std::chrono::seconds(5));
 
     return 0;
 #endif

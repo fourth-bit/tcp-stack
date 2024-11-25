@@ -12,7 +12,7 @@ template <std::integral T>
 T host_to_network(T num)
 {
     if constexpr (sizeof(T) == 8) {
-        return htonll(num);
+        return htobe64(num);
     } else if constexpr (sizeof(T) == 4) {
         return htonl(num);
     } else if constexpr (sizeof(T) == 2) {
@@ -32,7 +32,7 @@ template <std::integral T>
 T network_to_host(T num)
 {
     if constexpr (sizeof(T) == 8) {
-        return ntohll(num);
+        return be64toh(num);
     } else if constexpr (sizeof(T) == 4) {
         return ntohl(num);
     } else if constexpr (sizeof(T) == 2) {
