@@ -5,6 +5,7 @@
 #include "IPv4Address.h"
 #include <optional>
 #include <sstream>
+#include <functional>
 
 std::optional<IPv4Address> IPv4Address::FromString(const std::string& str)
 {

@@ -253,6 +253,8 @@ class TCPSocketBackend : public std::enable_shared_from_this<TCPSocketBackend>, 
                 return "CLOSING";
             case TIME_WAIT:
                 return "TIME_WAIT";
+            default:
+                return "UNKNOWN";
             }
         }
 
