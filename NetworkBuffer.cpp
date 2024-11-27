@@ -217,6 +217,20 @@ NetworkBuffer NetworkBufferConfig::BuildBuffer(size_t payload_size) const
 
     return buffer;
 }
+void NetworkBufferConfig::AddLayer(LayerType type, std::unique_ptr<NetworkLayer::Config> config)
+{
+    m_layer_configs.emplace_back(type, std::move(config));
+}
+NetworkBufferConfig NetworkBufferConfig::Copy() const
+{
+    NetworkBufferConfig new_config { };
+
+    for (auto& [type, config_ptr] : m_layer_configs) {
+        new_config.AddLayer(type, std::unique_ptr<NetworkLayer::Config>(config_ptr->Copy()));
+    }
+
+    return new_config;
+}
 
 void EthernetLayer::Config::ConfigureLayer(NetworkLayer& net_layer)
 {
@@ -224,6 +238,10 @@ void EthernetLayer::Config::ConfigureLayer(NetworkLayer& net_layer)
     eth_layer.SetSourceMac(src_addr);
     eth_layer.SetDestMac(dest_addr);
     eth_layer.SetEthernetType(connection_type);
+}
+NetworkLayer::Config* EthernetLayer::Config::Copy() const
+{
+    return new EthernetLayer::Config(*this);
 }
 
 void ARPLayer::Config::ConfigureLayer(NetworkLayer& net_layer)
@@ -237,6 +255,10 @@ void ARPLayer::Config::ConfigureLayer(NetworkLayer& net_layer)
         arp_hdr.protype = (u16)(*pro_type);
         arp_hdr.prosize = pro_size_map.at(*pro_type);
     }
+}
+NetworkLayer::Config* ARPLayer::Config::Copy() const
+{
+    return new ARPLayer::Config(*this);
 }
 
 static u16 GenerateIPID()
@@ -260,10 +282,17 @@ void IPv4Layer::Config::ConfigureLayer(NetworkLayer& net_layer)
     header.SetFlags(flags);
     header.SetFragmentOffset(0);
 }
+NetworkLayer::Config* IPv4Layer::Config::Copy() const
+{
+    return new IPv4Layer::Config(*this);
+}
 void ICMPLayer::Config::ConfigureLayer(NetworkLayer&)
 {
 }
-
+NetworkLayer::Config* ICMPLayer::Config::Copy() const
+{
+    return new ICMPLayer::Config();
+}
 IPv6Header& IPv6Layer::GetHeader() {
     return m_view.as<IPv6Header>();
 }
@@ -278,6 +307,11 @@ void IPv6Layer::Config::ConfigureLayer(NetworkLayer& layer)
     ipv6.SetTrafficClass(traffic_class);
     header.hop_limit = hop_limit;
     header.payload_length = layer.UpperLayerPayload();
+    header.next_header = protocol;
+}
+NetworkLayer::Config* IPv6Layer::Config::Copy() const
+{
+    return new IPv6Layer::Config(*this);
 }
 void IPv6Layer::SetupConnection(const IPv6Connection& connection)
 {
@@ -290,7 +324,7 @@ void IPv6Layer::SetupConnection(const IPv6Connection& connection)
     header.hop_limit = 255;
     header.payload_length = UpperLayerPayload();
 }
-IPv6Layer::PsuedoHeader IPv6Layer::BuildPseudoHeader(u8 next_header)
+IPv6Layer::PsuedoHeader IPv6Layer::BuildPseudoHeader()
 {
     auto& header = GetHeader();
     return IPv6Layer::PsuedoHeader {
@@ -299,7 +333,7 @@ IPv6Layer::PsuedoHeader IPv6Layer::BuildPseudoHeader(u8 next_header)
         .length = NetworkOrdered<u32>(header.payload_length),
         .zero1 = 0,
         .zero2 = 0,
-        .next_header = next_header,
+        .next_header = header.next_header,
     };
 }
 void IPv6Layer::SetSourceAddr(NetworkIPv6Address address)
@@ -382,7 +416,7 @@ u16 ICMPv6Layer::RunICMPv6Checksum()
     // We need to calculate a pseudo-header for ipv6
     IPv6Layer* ip6 = m_parent->GetLayer<LayerType::IPv6>();
     auto& header = GetHeader();
-    auto pheader = ip6->BuildPseudoHeader(IPPROTO_ICMPV6);
+    auto pheader = ip6->BuildPseudoHeader();
 
     u32 csum = IPv4ChecksumAdd(&pheader, sizeof(pheader));
     u8* data = m_view.Data();
@@ -413,12 +447,20 @@ u16 ICMPv6Layer::GetCode()
 void ICMPv6Layer::Config::ConfigureLayer(NetworkLayer&)
 {
 }
+NetworkLayer::Config* ICMPv6Layer::Config::Copy() const
+{
+    return new ICMPv6Layer::Config();
+}
 
 void UDPLayer::Config::ConfigureLayer(NetworkLayer& net_layer)
 {
     auto& udp = net_layer.As<UDPLayer>();
     udp.SetDestPort(dest_port);
     udp.SetSourcePort(source_port);
+}
+NetworkLayer::Config* UDPLayer::Config::Copy() const
+{
+    return new UDPLayer::Config(*this);
 }
 UDPHeader& UDPLayer::GetHeader()
 {
@@ -523,6 +565,10 @@ size_t TCPLayer::Config::options_length()
     }
 
     return options_size;
+}
+NetworkLayer::Config* TCPLayer::Config::Copy() const
+{
+    return new TCPLayer::Config(*this);
 }
 
 void TCPLayer::SetSourcePort(u16 port)

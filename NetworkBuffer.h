@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <unordered_map>
+#include <variant>
 
 #include "Badge.h"
 #include "IPv4Address.h"
@@ -37,6 +38,7 @@ public:
 
     struct Config {
         virtual ~Config() = default;
+        virtual Config* Copy() const = 0;
 
         virtual size_t LayerSize() = 0;
         virtual void ConfigureLayer(NetworkLayer&) = 0;
@@ -67,6 +69,8 @@ public:
         EthernetMAC dest_addr;
         u16 connection_type;
 
+        NetworkLayer::Config* Copy() const override;
+
         constexpr size_t LayerSize() override { return sizeof(EthernetHeader); }
         void ConfigureLayer(NetworkLayer&) override;
     };
@@ -83,6 +87,8 @@ public:
     struct Config : NetworkLayer::Config {
         std::optional<arp_hardware> hw_type;
         std::optional<arp_proto> pro_type;
+
+        NetworkLayer::Config* Copy() const override;
 
         constexpr size_t LayerSize() override { return sizeof(ARPHeader); }
         void ConfigureLayer(NetworkLayer&) override;
@@ -111,6 +117,8 @@ public:
         u8 tos { 0 };
         u8 ttl { 64 };
         u8 proto { 0 };
+
+        NetworkLayer::Config* Copy() const override;
 
         size_t LayerSize() override
         { /* Fixme: As we add the possibility to have options change this  */
@@ -152,6 +160,9 @@ public:
         u32 flow_label { 0 };
         u8 traffic_class { 0 };
         u8 hop_limit { 255 };
+        u8 protocol { };
+
+        NetworkLayer::Config* Copy() const override;
 
         size_t LayerSize() override { return sizeof(IPv6Header);}
         void ConfigureLayer(NetworkLayer&) override;
@@ -167,7 +178,7 @@ public:
     };
 
     IPv6Header& GetHeader();
-    PsuedoHeader BuildPseudoHeader(u8 next_header);
+    PsuedoHeader BuildPseudoHeader();
 
     void SetupConnection(const IPv6Connection&);
     void SetSourceAddr(NetworkIPv6Address);
@@ -188,6 +199,8 @@ public:
     struct Config : NetworkLayer::Config {
         constexpr size_t LayerSize() override { return sizeof(ICMPv4Header); }
         void ConfigureLayer(NetworkLayer&) override;
+
+        NetworkLayer::Config* Copy() const override;
     };
     ICMPv4Header& GetHeader();
 
@@ -199,6 +212,8 @@ public:
     struct Config : NetworkLayer::Config {
         constexpr size_t LayerSize() override { return sizeof(ICMPv6Header); }
         void ConfigureLayer(NetworkLayer&) override;
+
+        NetworkLayer::Config* Copy() const override;
     };
     ICMPv6Header& GetHeader();
 
@@ -215,6 +230,8 @@ public:
     struct Config : NetworkLayer::Config {
         u16 source_port;
         u16 dest_port;
+
+        NetworkLayer::Config* Copy() const override;
 
         constexpr size_t LayerSize() override { return sizeof(UDPHeader); }
         void ConfigureLayer(NetworkLayer&) override;
@@ -238,6 +255,8 @@ public:
         u16 dest_port;
 
         std::optional<u16> MSS_option;
+
+        NetworkLayer::Config* Copy() const override;
 
         // Returns options length IN BYTES
         size_t options_length();
@@ -303,11 +322,7 @@ public:
     template <LayerType T>
     void AddLayer(typename LayerTypeToClass<T>::type::Config const& config)
     {
-        using CfgType = typename LayerTypeToClass<T>::type::Config;
-
-        // Fixme: this is a crime against coding. Use a copy constructor
-        std::unique_ptr config_heap = std::unique_ptr<CfgType>(new CfgType);
-        std::copy(&config, &config + 1, config_heap.get());
+        std::unique_ptr config_heap = std::unique_ptr<NetworkLayer::Config>(config.Copy());
 
         m_layer_configs.emplace_back(T, std::move(config_heap));
     }
@@ -353,7 +368,11 @@ public:
 
     NetworkBuffer BuildBuffer(size_t payload_size) const;
 
+    NetworkBufferConfig Copy() const;
+
 private:
+    void AddLayer(LayerType, std::unique_ptr<NetworkLayer::Config>);
+
     std::list<std::pair<LayerType, std::unique_ptr<NetworkLayer::Config>>> m_layer_configs;
 };
 
