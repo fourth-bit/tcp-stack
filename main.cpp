@@ -361,9 +361,17 @@ int main()
 #else
     initialize_net_dev();
 
-//    run_tcp_echo_server(1000);
+    ICMPv6Manager& icmp = the_net_dev->GetICMPv6Manager();
+//    std::optional<EthernetMAC> maybe_mac = icmp.SendNDP(IPv6Address(0xfde8'506e'c3a4'0000, 0x0000'0000'0000'0002));
+//    if (maybe_mac) {
+//        std::cout << "MAC: " << *maybe_mac << std::endl;
+//    } else {
+//        std::cout << "NDP Failed" << std::endl;
+//    }
+
+
+    //run_tcp_echo_server(1000);
     // run_tcp_connection({ IPv4Address::FromString("172.18.0.3").value() }, 1000);
-    for (;;) {}
 
     // Give the program time to clean up
     std::this_thread::sleep_for(std::chrono::seconds(5));

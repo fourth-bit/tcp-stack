@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <future>
+
 #include "NetworkBuffer.h"
 
 struct IPv6Connection;
@@ -18,6 +20,7 @@ public:
 
 private:
     std::unordered_map<IPv6Address, EthernetMAC, IPv6Hasher> m_ndp_map;
+    std::unordered_map<IPv6Address, std::promise<void>, IPv6Hasher> m_ndp_wait_map;
 
     NetworkDevice* m_net_dev;
     NetworkBufferConfig m_config;

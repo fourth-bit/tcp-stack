@@ -48,3 +48,10 @@ bool IPv6Address::MatchesMulticast(IPv6Address multicast) const
 
     return false;
 }
+bool IPv6Address::IsMulticast() const
+{
+    const SubnetMask6 multicast_subnet (IPv6Address(std::bitset<128>(0xFFFF'FFFF'FFFF'FFFF) << 64 | std::bitset<128>(~(u64)0xFF'FFFF)));
+    const IPv6Address multicast_base (0xff02'0000'0000'0000, 0x1'FF00'0000);
+
+    return ApplySubnetMask(multicast_subnet) == multicast_base;
+}

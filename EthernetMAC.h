@@ -17,3 +17,5 @@ public:
     bool IsBroadcast() const;
     bool IsIPv6Multicast(IPv6Address) const;
 } __attribute__((packed));
+
+std::ostream& operator<<(std::ostream& os, EthernetMAC);

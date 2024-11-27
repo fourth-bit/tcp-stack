@@ -55,7 +55,7 @@ public:
     }
 
     std::string ToString() const;
-    std::bitset<128> Get() { return m_address; }
+    std::bitset<128> Get() const { return m_address; }
 
     bool operator==(IPv6Address other) const
     {
@@ -63,6 +63,7 @@ public:
     }
 
     bool MatchesMulticast(IPv6Address) const;
+    bool IsMulticast() const;
 
     IPv6Address ApplySubnetMask(SubnetMask6) const;
 

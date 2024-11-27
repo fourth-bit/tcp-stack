@@ -49,3 +49,7 @@ bool EthernetMAC::IsIPv6Multicast(IPv6Address address) const
 
     return false;
 }
+std::ostream& operator<<(std::ostream& os, EthernetMAC mac)
+{
+    return os << mac.ToString();
+}

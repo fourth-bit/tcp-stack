@@ -353,6 +353,12 @@ NetworkDevice::NetworkDevice(EthernetMAC mac_address,
     m_default_ip4_config.AddLayer<LayerType::Ethernet>(eth_config);
     m_default_ip4_config.AddLayer<LayerType::IPv4>(ip4_config);
 
+    eth_config.connection_type = ETH_P_IPV6;
+    IPv6Layer::Config ip6_config {};
+    ip6_config.src_ip = m_ip6;
+    m_default_ip6_config.AddLayer<LayerType::Ethernet>(eth_config);
+    m_default_ip6_config.AddLayer<LayerType::IPv6>(ip6_config);
+
     // Setup A Wakeup for the fragment timeout and listen functions for the
     // (eventual) destructor
 
@@ -364,6 +370,9 @@ NetworkDevice::NetworkDevice(EthernetMAC mac_address,
 
     listen_thread = std::thread([this]() { Listen(); });
     fragment_timeout = std::jthread([this](std::stop_token token) { IPTimeoutFunction(token); });
+
+    // Initialize at end of constructor, otherwise buffer configs are wrong
+    icmpv6Manager = ICMPv6Manager { this };
 }
 
 NetworkDevice::~NetworkDevice() noexcept
@@ -564,7 +573,7 @@ void NetworkDevice::SendEthernet(NetworkBuffer data, EthernetMAC destination, u1
 }
 
 // Taken from: https://gist.github.com/fxlv/81209bbd150abfeaceb1f85ff076c9f3
-u32 IPv4ChecksumAdd(void* addr, int count, u32 start)
+u32 IPv4ChecksumAdd(void* addr, u32 count, u32 start)
 {
     // Simply sum all the 16 bit words
     u32 sum = start;
@@ -592,7 +601,7 @@ u16 IPv4ChecksumEnd(u32 csum)
     return ~csum;
 }
 
-u16 IPv4Checksum(void* addr, int count)
+u16 IPv4Checksum(void* addr, u32 count)
 {
     return IPv4ChecksumEnd(IPv4ChecksumAdd(addr, count));
 }
@@ -621,6 +630,14 @@ std::optional<NetworkDevice::IPv4Route> NetworkDevice::MakeRoutingDecision(IPv4A
 }
 std::optional<NetworkDevice::IPv6Route> NetworkDevice::MakeRoutingDecision(IPv6Address to)
 {
+    if (to.IsMulticast()) {
+        u32 multicast_bits = (to.Get() & std::bitset<128>(0xFFFFFF)).to_ulong();
+        EthernetMAC multicast_mac = { 0x33, 0x33, 0xff, (u8)(multicast_bits >> 16), (u8)((multicast_bits >> 8) & 0xff), (u8)(multicast_bits & 0xff) };
+        return { IPv6Route {
+            multicast_mac,
+            to } };
+    }
+
     IPv6Address target;
     if (to.ApplySubnetMask(subnet_mask6) == m_ip6.ApplySubnetMask(subnet_mask6)) {
         target = to;
@@ -635,8 +652,7 @@ std::optional<NetworkDevice::IPv6Route> NetworkDevice::MakeRoutingDecision(IPv6A
 
     return { IPv6Route {
         *result,
-        to
-    } };
+        to } };
 }
 void NetworkDevice::ResolveIPv4(NetworkBuffer& buffer, EthernetConnection& eth_connection)
 {
@@ -1110,8 +1126,12 @@ void NetworkDevice::SendIPv6(NetworkBuffer data, IPv6Address target, IPv6Header:
 
     std::optional<IPv6Route> maybe_route = MakeRoutingDecision(target);
 
+    if (!maybe_route) {
+        return;
+    }
+
     layer->SetSourceAddr((NetworkIPv6Address)m_ip6);
-    layer->SetDestAddr((NetworkIPv6Address)target);
+    layer->SetDestAddr((NetworkIPv6Address)maybe_route->dest_addr);
     layer->SetProtocol(protocol);
 
     SendEthernet(std::move(data), maybe_route->dest_mac, ETH_P_IPV6);
