@@ -23,8 +23,8 @@
 #include "UDPManager.h"
 #include "VLBuffer.h"
 
-u16 IPv4Checksum(void* address, int num_bytes);
-u32 IPv4ChecksumAdd(void* address, int count, u32 start = 0);
+u16 IPv4Checksum(void* address, u32 num_bytes);
+u32 IPv4ChecksumAdd(void* address, u32 count, u32 start = 0);
 u16 IPv4ChecksumEnd(u32);
 
 struct EthernetConnection {
@@ -147,6 +147,7 @@ public:
     std::optional<IPv4Connection> MakeIPConnection(IPv4Address);
 
     ICMPManager& GetICMPManager() { return icmpManager; };
+    ICMPv6Manager& GetICMPv6Manager() { return icmpv6Manager; };
     UDPManager& GetUDPManager() { return udpManager; }
     TCPManager& GetTCPManager() { return tcpManager; }
 
@@ -161,6 +162,7 @@ public:
     const IPv4Address& GetGateway() const { return m_router; }
     const SubnetMask& GetSubnetMask() const { return subnet_mask; }
     const NetworkBufferConfig& GetIPv4Config() const { return m_default_ip4_config; }
+    const NetworkBufferConfig& GetIPv6Config() const { return m_default_ip6_config; }
 
 private:
     void ResolveARP(NetworkBuffer&, EthernetConnection&);
@@ -196,6 +198,7 @@ private:
 
     NetworkBufferConfig m_arp_buffer_config;
     NetworkBufferConfig m_default_ip4_config;
+    NetworkBufferConfig m_default_ip6_config;
     NetworkBufferConfig m_default_l1_config;
 
     std::unordered_map<u32, EthernetMAC> arp_translation_table {};
