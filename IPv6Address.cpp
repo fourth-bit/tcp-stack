@@ -8,7 +8,7 @@
 
 NetworkIPv6Address::operator IPv6Address() const
 {
-    return { word2, word1 };
+    return { word1, word2 };
 }
 
 std::ostream& operator<<(std::ostream& os, const IPv6Address& ip6)
@@ -30,4 +30,21 @@ std::string IPv6Address::ToString() const
     }
 
     return ss.str();
+}
+IPv6Address IPv6Address::ApplySubnetMask(SubnetMask6 mask) const
+{
+    return IPv6Address(m_address & mask.m_address);
+}
+bool IPv6Address::MatchesMulticast(IPv6Address multicast) const
+{
+    // 1. Check that the other one is actually a multicast
+    const SubnetMask6 multicast_subnet (IPv6Address(std::bitset<128>(0xFFFF'FFFF'FFFF'FFFF) << 64 | std::bitset<128>(~(u64)0xFF'FFFF)));
+    const IPv6Address multicast_base (0xff02'0000'0000'0000, 0x1'FF00'0000);
+
+    if (multicast.ApplySubnetMask(multicast_subnet) == multicast_base) {
+        // Get the least significant digits
+        return ApplySubnetMask(~multicast_subnet) == multicast.ApplySubnetMask(~multicast_subnet);
+    }
+
+    return false;
 }

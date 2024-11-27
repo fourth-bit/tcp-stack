@@ -38,23 +38,53 @@ void initialize_net_dev()
     EthernetMAC mac_address {};
     std::copy(hw_addr, hw_addr + 6, mac_address.begin());
 
-    // Get the IP address using the same request
-    ioctl(fd, SIOCGIFADDR, &ifr);
-    auto* ipaddr = (struct sockaddr_in*)&ifr.ifr_addr;
+    // Get IP addresses a little differently, use getifaddrs because
+    // ipv6 doesn't work with ioctl
+    ifaddrs* ifas;
+    if (getifaddrs(&ifas) != 0) {
+        perror("getifaddrs");
+        return;
+    }
 
     // We don't need the socket anymore
     close(fd);
 
-    // Grab the ip address as an int from the sockaddr_in
-    auto ip_address = NetworkOrdered<u32>::WithNetworkOrder(ipaddr->sin_addr.s_addr);
+    IPv4Address ip4_address;
+    IPv6Address ip6_address;
+
+    // Traverse it as a linked list
+    for (ifaddrs* ifa = ifas; ifa != nullptr; ifa = ifa->ifa_next) {
+        // Only look at the eth0 device
+        if (strcmp(ifa->ifa_name, "eth0") == 0) {
+            int family = ifa->ifa_addr->sa_family;
+
+            if (family == AF_INET) {
+                auto* ipaddr = (sockaddr_in*)ifa->ifa_addr;
+                auto ip_address = NetworkOrdered<u32>::WithNetworkOrder(ipaddr->sin_addr.s_addr);
+                ip4_address = IPv4Address(ip_address);
+            } else if (family == AF_INET6) {
+                auto* ip6_sockaddr = (sockaddr_in6*)ifa->ifa_addr;
+                if (ip6_sockaddr->sin6_scope_id == 0) {
+                    auto* ip6_out = &ip6_sockaddr->sin6_addr;
+                    auto* ip6_network = reinterpret_cast<NetworkIPv6Address*>(ip6_out);
+                    ip6_address = (IPv6Address)*ip6_network;
+                }
+            }
+        }
+    }
+
+    freeifaddrs(ifas);
+
 
     the_net_dev = std::make_unique<NetworkDevice>(
         mac_address,
-        IPv4Address(ip_address),
+        ip4_address,
         16,
-        IPv4Address::FromString("172.18.0.1").value());
+        IPv4Address::FromString("172.18.0.1").value(),
+        ip6_address);
 
-    std::cout << IPv4Address(ip_address) << std::endl;
+    std::cout << "IPv4: " << ip4_address << std::endl;
+    std::cout << "IPv6: " << ip6_address << std::endl;
 
     //    for (int i = 0; i < 10; i++) {
     //        auto address = IPv4Address::FromString("172.18.0.7");
@@ -295,7 +325,7 @@ int main()
 
     std::this_thread::sleep_for(1s);
 
-#elif 1
+#elif 0
     ifaddrs* ifas;
     if (getifaddrs(&ifas) != 0) {
         perror("getifaddrs");
@@ -332,7 +362,8 @@ int main()
     initialize_net_dev();
 
 //    run_tcp_echo_server(1000);
-    run_tcp_connection({ IPv4Address::FromString("172.18.0.3").value() }, 1000);
+    // run_tcp_connection({ IPv4Address::FromString("172.18.0.3").value() }, 1000);
+    for (;;) {}
 
     // Give the program time to clean up
     std::this_thread::sleep_for(std::chrono::seconds(5));

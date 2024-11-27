@@ -20,12 +20,14 @@ enum class LayerType {
     IPv4,
     IPv6,
     ICMP,
+    ICMPv6,
     TCP,
     UDP,
     Unknown,
 };
 
 class NetworkBuffer;
+struct IPv6Connection;
 
 class NetworkLayer {
     friend class NetworkBuffer;
@@ -43,6 +45,7 @@ public:
     template <typename T>
     T& As() { return reinterpret_cast<T&>(*this); }
     size_t Size() { return m_view.Size(); }
+    size_t UpperLayerPayload();
     u8* Data() { return m_view.Data(); }
 
 protected:
@@ -143,11 +146,42 @@ public:
 class IPv6Layer : public NetworkLayer {
 public:
     struct Config : NetworkLayer::Config {
+        IPv6Address src_ip {};
+        IPv6Address dest_ip {};
+
+        u32 flow_label { 0 };
+        u8 traffic_class { 0 };
+        u8 hop_limit { 255 };
+
         size_t LayerSize() override { return sizeof(IPv6Header);}
         void ConfigureLayer(NetworkLayer&) override;
     };
 
+    struct __attribute__((packed)) PsuedoHeader {
+        NetworkIPv6Address source;
+        NetworkIPv6Address dest;
+        NetworkOrdered<u32> length;
+        u16 zero1 { 0 };
+        u8 zero2 { 0 };
+        u8 next_header;
+    };
+
     IPv6Header& GetHeader();
+    PsuedoHeader BuildPseudoHeader(u8 next_header);
+
+    void SetupConnection(const IPv6Connection&);
+    void SetSourceAddr(NetworkIPv6Address);
+    void SetDestAddr(NetworkIPv6Address);
+    void SetProtocol(IPv6Header::ProtocolType);
+    IPv6Address GetSourceAddr();
+    IPv6Address GetDestAddr();
+
+    u32 GetVersion();
+    u32 GetTrafficClass();
+    u32 GetFlowLabel();
+    void SetVersion(u32);
+    void SetTrafficClass(u32);
+    void SetFlowLabel(u32);
 };
 class ICMPLayer : public NetworkLayer {
 public:
@@ -159,6 +193,22 @@ public:
 
     void ApplyICMPv4Checksum(u64 payload_length);
     u16 RunICMPv4Checksum(u64 payload_length);
+};
+class ICMPv6Layer : public NetworkLayer {
+public:
+    struct Config : NetworkLayer::Config {
+        constexpr size_t LayerSize() override { return sizeof(ICMPv6Header); }
+        void ConfigureLayer(NetworkLayer&) override;
+    };
+    ICMPv6Header& GetHeader();
+
+    void ApplyICMPv6Checksum();
+    u16 RunICMPv6Checksum();
+
+    void SetType(u16);
+    void SetCode(u16);
+    u16 GetType();
+    u16 GetCode();
 };
 class UDPLayer : public NetworkLayer {
 public:
@@ -230,6 +280,10 @@ struct LayerTypeToClass<LayerType::IPv4> {
 template <>
 struct LayerTypeToClass<LayerType::ICMP> {
     using type = ICMPLayer;
+};
+template <>
+struct LayerTypeToClass<LayerType::ICMPv6> {
+    using type = ICMPv6Layer;
 };
 template <>
 struct LayerTypeToClass<LayerType::IPv6> {
@@ -369,6 +423,9 @@ public:
         return m_buffer.Size();
     }
     u8* Data() { return m_buffer.Data(); }
+
+    auto begin() { return m_layers.begin(); }
+    auto end() { return m_layers.end(); }
 
 private:
     VLBuffer m_buffer;

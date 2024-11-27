@@ -97,9 +97,14 @@ struct IPv4Header {
 } __attribute__((packed));
 
 struct IPv6Header {
-    u32 flow_label : 20;
-    u32 traffic_class : 8;
-    u32 version : 4;
+    enum ProtocolType {
+        ICMPv6 = IPPROTO_ICMPV6,
+        TCP = IPPROTO_TCP,
+        UDP = IPPROTO_UDP,
+    };
+
+    // Four bits are the version, 8 for the traffic class, and 20 for the flow label
+    NetworkOrdered<u32> first_32_bits;
     NetworkOrdered<u16> payload_length;
     u8 next_header;
     u8 hop_limit;
@@ -122,7 +127,6 @@ struct ICMPv4Header {
     // Payload in included in the calculation of the checksum
     NetworkOrdered<u16> checksum;
 } __attribute__((packed));
-
 struct ICMPv4Echo {
     // Sender sets this to know what process is meant to receive it
     NetworkOrdered<u16> id;
@@ -130,6 +134,61 @@ struct ICMPv4Echo {
     NetworkOrdered<u16> seq;
     // Optional field. Can contain time information
     u8 data[];
+} __attribute__((packed));
+
+struct ICMPv6Header {
+    enum RequestType {
+        DestUnreachable = 1,
+        EchoRequest = 128,
+        EchoReply = 129,
+        NeighborSolicitation = 135,
+        NeighborAdvertisement = 136,
+    };
+
+    u8 type;
+    u8 code;
+    NetworkOrdered<u16> checksum;
+} __attribute__((packed));
+struct ICMPv6Echo {
+    // These fields are given in an ICMP header
+    // u8 type;
+    // u8 code;
+    // u16 checksum;
+
+    NetworkOrdered<u16> id;
+    NetworkOrdered<u16> sequence;
+    u8 data[];
+} __attribute__((packed));
+struct ICMPv6NetworkSolicitation {
+    struct Option {
+        u8 type;
+        u8 length; // Units of 8
+        u8 data[];
+    };
+
+    u32 _reserved;
+    NetworkIPv6Address target_address;
+    u8 options[];
+} __attribute__((packed));
+struct ICMPv6NetworkAdvertisement {
+    enum Flags {
+        Router = 0b100,
+        Solicited = 0b10,
+        Override = 0b1,
+    };
+
+    struct Option {
+        u8 type;
+        u8 length; // Units of 8
+        u8 data[];
+    };
+
+    u8 _reserved : 5;
+    u8 flags : 3;
+    u8 _reserved2;
+    u16 _reserved3;
+    NetworkIPv6Address target_address;
+    u8 options[];
 } __attribute__((packed));
 
 struct UDPHeader {

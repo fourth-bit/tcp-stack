@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "IPv6Address.h"
 #include "IntDefs.h"
 #include <array>
 #include <string>
@@ -14,4 +15,5 @@ public:
     bool operator!=(const EthernetMAC& other) { return !(*this == other); };
     std::string ToString() const;
     bool IsBroadcast() const;
+    bool IsIPv6Multicast(IPv6Address) const;
 } __attribute__((packed));

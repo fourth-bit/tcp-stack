@@ -50,8 +50,6 @@ void TCPManager::HandleIncoming(NetworkBuffer buffer, IPv4Connection ip_connecti
         }
 
         auto socket = m_listening_ports[header.dest_port];
-        // MAYBE TODO: Refactor the State::Listen to another method, because the connection
-        //             arg is only needed there.
         socket->HandleIncomingPacket(std::move(buffer), connection);
         return;
     }

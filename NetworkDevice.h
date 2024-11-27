@@ -14,6 +14,7 @@
 #include "./Error.h"
 #include "EthernetMAC.h"
 #include "ICMPManager.h"
+#include "ICMPv6Manager.h"
 #include "IPv4Address.h"
 #include "NetworkBuffer.h"
 #include "NetworkOrder.h"
@@ -111,18 +112,31 @@ private:
     std::list<std::pair<std::chrono::steady_clock::time_point, IPv4FragmentID>>::iterator m_it;
 };
 
+struct IPv6Connection {
+    EthernetConnection eth;
+    IPv6Address connected_ip;
+    IPv6Address our_ip;
+
+    u32 flow_label;
+    u8 traffic_class;
+
+    NetworkBuffer BuildBufferWith(NetworkBufferConfig&, size_t) const;
+};
+
 class NetworkDevice {
 public:
     NetworkDevice(EthernetMAC mac_address,
         IPv4Address ip_str,
         u8 subnet,
         IPv4Address router,
+        IPv6Address ip6,
         size_t MTU = 1500);
     ~NetworkDevice() noexcept;
 
     void Listen();
 
     void SendIPv4(NetworkBuffer data, IPv4Address, IPv4Header::ProtocolType);
+    void SendIPv6(NetworkBuffer data, IPv6Address, IPv6Header::ProtocolType);
     void SendEthernet(NetworkBuffer data, EthernetMAC, u16 protocol);
 
     std::optional<EthernetMAC> SendArp(IPv4Address target);
@@ -138,10 +152,12 @@ public:
 
     EthernetConnection FlipConnection(const EthernetConnection&);
     IPv4Connection FlipConnection(const IPv4Connection&);
+    IPv6Connection FlipConnection(const IPv6Connection&);
 
     const size_t& GetMTU() const { return MTU; }
     const EthernetMAC& GetMac() const { return mac; }
     const IPv4Address& GetIPAddress() const { return ip; }
+    const IPv6Address& GetIPv6Address() const { return m_ip6; }
     const IPv4Address& GetGateway() const { return m_router; }
     const SubnetMask& GetSubnetMask() const { return subnet_mask; }
     const NetworkBufferConfig& GetIPv4Config() const { return m_default_ip4_config; }
@@ -153,12 +169,17 @@ private:
 
     void IPTimeoutFunction(std::stop_token);
 
-    struct Route {
+    struct IPv4Route {
         EthernetMAC dest_mac;
         IPv4Address dest_addr;
     };
+    struct IPv6Route {
+        EthernetMAC dest_mac;
+        IPv6Address dest_addr;
+    };
 
-    static std::optional<Route> MakeRoutingDecision(IPv4Address);
+    std::optional<IPv4Route> MakeRoutingDecision(IPv4Address);
+    std::optional<IPv6Route> MakeRoutingDecision(IPv6Address);
 
     int tun_fd;
     int m_thread_notify_fd;
@@ -166,8 +187,11 @@ private:
 
     size_t MTU;
     IPv4Address ip;
+    IPv6Address m_ip6;
     IPv4Address m_router;
+    IPv6Address m_router6 { }; // FIXME: Same comment here
     SubnetMask subnet_mask;
+    SubnetMask6 subnet_mask6 { }; // FIXME: This is just default initializing for now
     EthernetMAC mac;
 
     NetworkBufferConfig m_arp_buffer_config;
@@ -188,10 +212,12 @@ private:
     static constexpr std::chrono::milliseconds fragment_timeout_time { 5000 };
 
     ICMPManager icmpManager;
+    ICMPv6Manager icmpv6Manager;
     UDPManager udpManager;
     TCPManager tcpManager;
 
     std::jthread fragment_timeout;
+    bool ShouldRecieveOnMac(const EthernetMAC& destination_mac) const;
 };
 
 extern std::unique_ptr<NetworkDevice> the_net_dev;

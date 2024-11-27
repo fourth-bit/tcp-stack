@@ -37,3 +37,15 @@ std::string EthernetMAC::ToString() const
 
     return std::string(buf);
 }
+bool EthernetMAC::IsIPv6Multicast(IPv6Address address) const
+{
+    if (this->at(0) == 0x33 && this->at(1) == 0x33 && this->at(2) == 0x0ff) {
+        u32 last32bits = (address.Get() & std::bitset<128>(0xFF'FFFF)).to_ulong();
+
+        return this->at(3) == (last32bits & 0xFF << 16)
+            && this->at(4) == (last32bits & 0xFF << 8)
+            && this->at(5) == (last32bits & 0xFF << 0);
+    }
+
+    return false;
+}

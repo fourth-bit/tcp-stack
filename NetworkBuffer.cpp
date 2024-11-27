@@ -10,6 +10,21 @@
 #include <netinet/ip.h>
 #include <unordered_map>
 
+size_t NetworkLayer::UpperLayerPayload()
+{
+    size_t size = m_parent->Size();
+
+    for (auto& [_, layer] : *m_parent) {
+        if (layer.get() == this) {
+            size -= Size();
+            break;
+        }
+
+        size -= layer->Size();
+    }
+
+    return size;
+}
 void EthernetLayer::SetupEthConnection(const EthernetConnection& connection)
 {
     SetEthernetType(connection.connection_type);
@@ -249,13 +264,162 @@ void ICMPLayer::Config::ConfigureLayer(NetworkLayer&)
 {
 }
 
+IPv6Header& IPv6Layer::GetHeader() {
+    return m_view.as<IPv6Header>();
+}
+void IPv6Layer::Config::ConfigureLayer(NetworkLayer& layer)
+{
+    auto& ipv6 = layer.As<IPv6Layer>();
+    auto& header = ipv6.GetHeader();
+    ipv6.SetVersion(6);
+    header.source_ip = (NetworkIPv6Address)src_ip;
+    header.dest_ip = (NetworkIPv6Address)dest_ip;
+    ipv6.SetFlowLabel(flow_label);
+    ipv6.SetTrafficClass(traffic_class);
+    header.hop_limit = hop_limit;
+    header.payload_length = layer.UpperLayerPayload();
+}
+void IPv6Layer::SetupConnection(const IPv6Connection& connection)
+{
+    auto& header = GetHeader();
+    SetVersion(6);
+    header.source_ip = (NetworkIPv6Address)connection.our_ip;
+    header.dest_ip = (NetworkIPv6Address)connection.connected_ip;
+    SetFlowLabel(connection.flow_label);
+    SetTrafficClass(connection.traffic_class);
+    header.hop_limit = 255;
+    header.payload_length = UpperLayerPayload();
+}
+IPv6Layer::PsuedoHeader IPv6Layer::BuildPseudoHeader(u8 next_header)
+{
+    auto& header = GetHeader();
+    return IPv6Layer::PsuedoHeader {
+        .source = header.source_ip,
+        .dest = header.dest_ip,
+        .length = NetworkOrdered<u32>(header.payload_length),
+        .zero1 = 0,
+        .zero2 = 0,
+        .next_header = next_header,
+    };
+}
+void IPv6Layer::SetSourceAddr(NetworkIPv6Address address)
+{
+    auto& header = GetHeader();
+    header.source_ip = address;
+}
+void IPv6Layer::SetDestAddr(NetworkIPv6Address address)
+{
+    auto& header = GetHeader();
+    header.dest_ip = address;
+}
+void IPv6Layer::SetProtocol(IPv6Header::ProtocolType protocol)
+{
+    // TODO: When we add options (e.g. Fragmentation), this needs to be smarter
+    auto& header = GetHeader();
+    header.next_header = protocol;
+}
+IPv6Address IPv6Layer::GetDestAddr()
+{
+    auto& header = GetHeader();
+    return (IPv6Address)header.dest_ip;
+}
+IPv6Address IPv6Layer::GetSourceAddr()
+{
+    auto& header = GetHeader();
+    return (IPv6Address)header.source_ip;
+}
+u32 IPv6Layer::GetVersion()
+{
+    auto& header = GetHeader();
+    return header.first_32_bits.Convert() >> 28;
+}
+u32 IPv6Layer::GetTrafficClass()
+{
+    auto& header = GetHeader();
+    return (header.first_32_bits.Convert() >> 20) & 0xff;
+}
+u32 IPv6Layer::GetFlowLabel()
+{
+    auto& header = GetHeader();
+    return header.first_32_bits & 0xf'ffff;
+}
+void IPv6Layer::SetVersion(u32 version)
+{
+    auto& header = GetHeader();
+    u32 bits = header.first_32_bits.Convert();
+    bits &= 0xfff'ffff;
+    bits |= version << 28;
+    header.first_32_bits = bits;
+}
+void IPv6Layer::SetTrafficClass(u32 traffic_class)
+{
+    auto& header = GetHeader();
+    u32 bits = header.first_32_bits.Convert();
+    bits &= 0xf00f'ffff;
+    bits |= traffic_class << 20;
+    header.first_32_bits = bits;
+}
+void IPv6Layer::SetFlowLabel(u32 flow_label)
+{
+    auto& header = GetHeader();
+    u32 bits = header.first_32_bits.Convert();
+    bits &= 0xfff0'0000;
+    bits |= flow_label;
+    header.first_32_bits = bits;
+}
+ICMPv6Header& ICMPv6Layer::GetHeader()
+{
+    return m_view.as<ICMPv6Header>();
+}
+void ICMPv6Layer::ApplyICMPv6Checksum()
+{
+    ICMPv6Header& header = GetHeader();
+    header.checksum = 0;
+    header.checksum = RunICMPv6Checksum();
+}
+u16 ICMPv6Layer::RunICMPv6Checksum()
+{
+    // We need to calculate a pseudo-header for ipv6
+    IPv6Layer* ip6 = m_parent->GetLayer<LayerType::IPv6>();
+    auto& header = GetHeader();
+    auto pheader = ip6->BuildPseudoHeader(IPPROTO_ICMPV6);
+
+    u32 csum = IPv4ChecksumAdd(&pheader, sizeof(pheader));
+    u8* data = m_view.Data();
+    csum = IPv4ChecksumAdd(data, pheader.length, csum);
+
+    return IPv4ChecksumEnd(csum);
+}
+void ICMPv6Layer::SetType(u16 type)
+{
+    ICMPv6Header& header = GetHeader();
+    header.type = type;
+}
+void ICMPv6Layer::SetCode(u16 code)
+{
+    ICMPv6Header& header = GetHeader();
+    header.code = code;
+}
+u16 ICMPv6Layer::GetType()
+{
+    ICMPv6Header& header = GetHeader();
+    return header.type;
+}
+u16 ICMPv6Layer::GetCode()
+{
+    ICMPv6Header& header = GetHeader();
+    return header.code;
+}
+void ICMPv6Layer::Config::ConfigureLayer(NetworkLayer&)
+{
+}
+
 void UDPLayer::Config::ConfigureLayer(NetworkLayer& net_layer)
 {
     auto& udp = net_layer.As<UDPLayer>();
     udp.SetDestPort(dest_port);
     udp.SetSourcePort(source_port);
 }
-
 UDPHeader& UDPLayer::GetHeader()
 {
     return m_view.as<UDPHeader>();

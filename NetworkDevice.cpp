@@ -20,6 +20,7 @@
 #include "NetworkDevice.h"
 
 #define USE_TUN 0
+#define DEBUG_TRACE_PACKETS
 
 struct make_tun_return {
     int fd;
@@ -160,6 +161,17 @@ NetworkBuffer IPv4Connection::BuildBufferWith(NetworkBufferConfig& config, size_
 
     return buffer;
 }
+NetworkBuffer IPv6Connection::BuildBufferWith(NetworkBufferConfig& config, size_t payload_size) const
+{
+    auto buffer = eth.BuildBufferWith(config, payload_size);
+    IPv6Layer* layer = buffer.GetLayer<LayerType::IPv6>();
+
+    if (layer) {
+        layer->SetupConnection(*this);
+    }
+
+    return buffer;
+}
 
 bool IPv4Fragments::AddFragment(NetworkBuffer data)
 {
@@ -253,14 +265,17 @@ NetworkDevice::NetworkDevice(EthernetMAC mac_address,
     IPv4Address ip_addr,
     u8 subnet,
     IPv4Address router,
+    IPv6Address ip6,
     size_t mtu)
     : mac(mac_address)
     , m_router(router)
     , icmpManager(this)
+    , icmpv6Manager(this)
     , udpManager(this)
     , tcpManager(this)
     , MTU(mtu)
     , m_arp_buffer_config()
+    , m_ip6(ip6)
 {
     // Fixme: Refactor to a factory
 
@@ -367,6 +382,21 @@ NetworkDevice::~NetworkDevice() noexcept
     }
 }
 
+bool NetworkDevice::ShouldRecieveOnMac(const EthernetMAC& destination_mac) const
+{
+    if (destination_mac.IsBroadcast() || destination_mac == mac) {
+        return true;
+    }
+
+    // Next we need to check multicast
+    // 33:33:IPv6 is an IPv6 Multicast
+    if (destination_mac.IsIPv6Multicast(m_ip6)) {
+        return true;
+    }
+
+    return false;
+}
+
 void NetworkDevice::Listen()
 {
     fd_set master_read_fds;
@@ -406,7 +436,7 @@ void NetworkDevice::Listen()
         auto& header = buffer.as<EthernetHeader>();
 
         // Check if transmission is for us
-        if ((!header.dest_mac.IsBroadcast() && header.dest_mac != mac) || header.src_mac == mac) {
+        if (!ShouldRecieveOnMac(header.dest_mac) || header.src_mac == mac) {
             // std::cout << "Transmission Not For Us" << std::endl;
             // header.dest_mac.Dump();
             continue;
@@ -441,7 +471,7 @@ void NetworkDevice::Listen()
             break;
         case ETH_P_IPV6:
 #ifdef DEBUG_TRACE_PACKETS
-            std::cout << "Resolving IPv4" << std::endl;
+            std::cout << "Resolving IPv6" << std::endl;
 #endif
             ResolveIPv6(layered_buffer, connection);
             break;
@@ -570,24 +600,42 @@ u16 IPv4Buffer::RunIPHeaderChecksum()
 {
     return IPv4Checksum(m_buffer.Data() + sizeof(EthernetHeader), GetIPv4Header().header_length * 4);
 }
-std::optional<NetworkDevice::Route> NetworkDevice::MakeRoutingDecision(IPv4Address to)
+std::optional<NetworkDevice::IPv4Route> NetworkDevice::MakeRoutingDecision(IPv4Address to)
 {
-    SubnetMask mask = the_net_dev->GetSubnetMask();
     IPv4Address target;
-    if (to.ApplySubnetMask(mask) == the_net_dev->GetIPAddress().ApplySubnetMask(mask)) {
+    if (to.ApplySubnetMask(subnet_mask) == ip.ApplySubnetMask(subnet_mask)) {
         target = to;
     } else {
-        target = the_net_dev->GetGateway();
+        target = m_router;
     }
 
-    auto result = the_net_dev->SendArp(target);
+    auto result = SendArp(target);
     if (!result) {
         return {};
     }
 
-    return { NetworkDevice::Route {
+    return { IPv4Route {
         *result,
         to,
+    } };
+}
+std::optional<NetworkDevice::IPv6Route> NetworkDevice::MakeRoutingDecision(IPv6Address to)
+{
+    IPv6Address target;
+    if (to.ApplySubnetMask(subnet_mask6) == m_ip6.ApplySubnetMask(subnet_mask6)) {
+        target = to;
+    } else {
+        target = m_router6;
+    }
+
+    auto result = icmpv6Manager.SendNDP(target);
+    if (!result) {
+        return {};
+    }
+
+    return { IPv6Route {
+        *result,
+        to
     } };
 }
 void NetworkDevice::ResolveIPv4(NetworkBuffer& buffer, EthernetConnection& eth_connection)
@@ -924,8 +972,147 @@ IPv4Connection NetworkDevice::FlipConnection(const IPv4Connection& other)
 
     return flipped;
 }
+IPv6Connection NetworkDevice::FlipConnection(const IPv6Connection& other)
+{
+    IPv6Connection flipped {
+        .eth = FlipConnection(other.eth),
+        .connected_ip = other.connected_ip,
+        .our_ip = other.our_ip,
+        .flow_label = other.flow_label,
+        .traffic_class = other.traffic_class,
+    };
+
+    return flipped;
+}
 
 void NetworkDevice::ResolveIPv6(NetworkBuffer& buffer, EthernetConnection& connection)
 {
+    IPv6Layer& ipv6 = buffer.AddLayer<LayerType::IPv6>(sizeof(IPv6Header));
+    auto& header = ipv6.GetHeader();
 
+    if (ipv6.GetVersion() != 6) {
+        std::cerr << "Received IPv6 Packet without version set to 6: Version is " << ipv6.GetVersion() << ". Dropping" << std::endl;
+        return;
+    }
+
+    // Is it for us?
+    // Two ways, we are the destination, or it matches a multicast for us
+    IPv6Address dest = ipv6.GetDestAddr();
+    if (!m_ip6.MatchesMulticast(ipv6.GetDestAddr()) && m_ip6 != ipv6.GetDestAddr()) {
+        // Not for us, dropping
+        return;
+    }
+
+    // Parse the next header
+    // Consider this to have variable width header size
+    // We will resize as necessary
+    u8 next_header = header.next_header;
+    size_t current_size = sizeof(IPv6Header);
+    bool more_options = true;
+    for (int i = 0; i < 100 && more_options; i++) { // Avoid getting caught in infinite loop, 100 options seems reasonable enough
+        switch (next_header) {
+        case IPPROTO_HOPOPTS: {
+            // Hop-by-hop options
+            auto payload = buffer.GetPayload();
+            next_header = payload[0];
+            u8 header_length = payload[1];
+            current_size += header_length;
+            buffer.ResizeTop(current_size);
+
+            // TODO: Implement
+            break;
+        }
+        case IPPROTO_ROUTING: {
+            // Routing options for tracking visited nodes
+            auto payload = buffer.GetPayload();
+            next_header = payload[0];
+            u8 header_length = payload[1];
+            current_size += header_length;
+            buffer.ResizeTop(current_size);
+
+            // TODO: Implement
+            break;
+        }
+        case IPPROTO_FRAGMENT: {
+            auto payload = buffer.GetPayload();
+            struct IPv6FragmentHeader {
+                u8 next_header;
+                u8 reserved;
+                u16 m : 1;
+                u16 res : 2;
+                u16 fragment_offset : 13;
+                u32 identification;
+            } __attribute__((packed));
+
+            auto& frag_header = payload.as<IPv6FragmentHeader>();
+            next_header = frag_header.next_header;
+            current_size += sizeof(frag_header);
+            buffer.ResizeTop(sizeof(frag_header));
+
+            // TODO: Implement
+            break;
+        }
+        case IPPROTO_DSTOPTS: {
+            // Routing options for tracking visited nodes
+            auto payload = buffer.GetPayload();
+            next_header = payload[0];
+            u8 header_length = payload[1];
+            current_size += header_length;
+            buffer.ResizeTop(current_size);
+
+            // TODO: Implement
+            break;
+        }
+        case IPPROTO_NONE:
+            // Drop the packet
+            return;
+        case IPPROTO_ENCAP:
+        case IPPROTO_AH: // Authentication
+            std::cerr << "Recieved IPv6 Packet with Unsupported Option: " << (u16)next_header << ". Dropping" << std::endl;
+            return;
+        default:
+            // This means that the protocol is likely not an extension header (it will be caught as unsupported otherwise)
+            more_options = false;
+            break;
+        }
+    }
+
+    IPv6Connection ip_connection = {
+        .eth = connection,
+        .connected_ip = (IPv6Address)header.source_ip,
+        .our_ip = (IPv6Address)header.dest_ip,
+        .flow_label = ipv6.GetFlowLabel(),
+        .traffic_class = (u8)ipv6.GetTrafficClass(),
+    };
+
+    switch (next_header) {
+    case IPv6Header::TCP:
+    case IPv6Header::UDP:
+        break;
+    case IPv6Header::ICMPv6:
+#ifdef DEBUG_TRACE_PACKETS
+        std::cout << "Resolving ICMPv6" << std::endl;
+#endif
+        icmpv6Manager.HandleIncoming(std::move(buffer), ip_connection);
+        break;
+    default:
+        std::cerr << "Received IPv6 Packet with Unsupported Protocol: " << (u16)next_header << ". Dropping" << std::endl;
+        break;
+    }
+}
+void NetworkDevice::SendIPv6(NetworkBuffer data, IPv6Address target, IPv6Header::ProtocolType protocol)
+{
+    IPv6Layer* layer = data.GetLayer<LayerType::IPv6>();
+    if (!layer) {
+        std::cerr << "SendIPv6 Received Malformed Buffer" << std::endl;
+        return;
+    }
+
+    std::optional<IPv6Route> maybe_route = MakeRoutingDecision(target);
+
+    layer->SetSourceAddr((NetworkIPv6Address)m_ip6);
+    layer->SetDestAddr((NetworkIPv6Address)target);
+    layer->SetProtocol(protocol);
+
+    SendEthernet(std::move(data), maybe_route->dest_mac, ETH_P_IPV6);
 }
