@@ -12,6 +12,8 @@ struct IPv6Connection;
 class NetworkDevice;
 
 class ICMPv6Manager {
+    friend class NetworkDevice;
+
 public:
     explicit ICMPv6Manager(NetworkDevice* dev);
     void HandleIncoming(NetworkBuffer, IPv6Connection);

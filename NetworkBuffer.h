@@ -15,6 +15,10 @@
 #include "Protocols.h"
 #include "VLBuffer.h"
 
+u16 IPv4Checksum(void* address, u32 num_bytes);
+u32 IPv4ChecksumAdd(void* address, u32 count, u32 start = 0);
+u16 IPv4ChecksumEnd(u32);
+
 enum class LayerType {
     Ethernet,
     ARP,
@@ -277,8 +281,23 @@ public:
 
     u16 RunChecksum();
     void ApplyChecksum();
-    u16 RunChecksum(IPv4Layer::PsuedoHeader);
-    void ApplyChecksum(IPv4Layer::PsuedoHeader);
+
+    template<typename T>
+    void ApplyChecksum(T pheader)
+    {
+        auto& header = GetHeader();
+        header.checksum = 0;
+        header.checksum = RunChecksum<T>(pheader);
+    }
+    template<typename T>
+    u16 RunChecksum(T pheader)
+    {
+        u32 csum = IPv4ChecksumAdd((void*)&pheader, sizeof(pheader));
+        u8* data = m_view.Data();
+        csum = IPv4ChecksumAdd(data, pheader.length, csum);
+
+        return IPv4ChecksumEnd(csum);
+    }
 };
 
 template <LayerType T>

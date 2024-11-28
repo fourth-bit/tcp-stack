@@ -23,10 +23,6 @@
 #include "UDPManager.h"
 #include "VLBuffer.h"
 
-u16 IPv4Checksum(void* address, u32 num_bytes);
-u32 IPv4ChecksumAdd(void* address, u32 count, u32 start = 0);
-u16 IPv4ChecksumEnd(u32);
-
 struct EthernetConnection {
     EthernetMAC source_mac;
     EthernetMAC destination_mac;
@@ -43,6 +39,8 @@ struct IPv4Connection {
     u32 type_of_service;
 
     NetworkBuffer BuildBufferWith(NetworkBufferConfig&, size_t) const;
+
+    NetworkConnection ToNetworkConnection() const;
 };
 
 struct IPv4FragmentID {
@@ -121,6 +119,8 @@ struct IPv6Connection {
     u8 traffic_class;
 
     NetworkBuffer BuildBufferWith(NetworkBufferConfig&, size_t) const;
+
+    NetworkConnection ToNetworkConnection() const;
 };
 
 class NetworkDevice {

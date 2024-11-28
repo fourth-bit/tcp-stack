@@ -143,7 +143,7 @@ void run_tcp_connection(NetworkAddress target, u16 port)
 
 void run_tcp_echo_server(u16 incoming_port)
 {
-    std::unique_ptr<TCPSocket> sock(dynamic_cast<TCPSocket*>(Socket::Create(PROTOCOL::INTERNET, SOCK_TYPE::STREAM)));
+    std::unique_ptr<TCPSocket> sock(dynamic_cast<TCPSocket*>(Socket::Create(PROTOCOL::INTERNET6, SOCK_TYPE::STREAM)));
     sock->Bind(incoming_port);
 
     sock->Listen();
@@ -182,9 +182,8 @@ void run_tcp_echo_server(u16 incoming_port)
         }
 
         auto [network_addr, port] = *info_raw;
-        auto ip = std::get<IPv4Address>(network_addr);
 
-        std::cout << ip << ": ";
+        std::cout << network_addr << ": ";
         for (size_t i = 0; i < buffer.Size(); i++) {
             std::cout << buffer[i];
         }
@@ -361,7 +360,7 @@ int main()
 #else
     initialize_net_dev();
 
-    ICMPv6Manager& icmp = the_net_dev->GetICMPv6Manager();
+//    ICMPv6Manager& icmp = the_net_dev->GetICMPv6Manager();
 //    std::optional<EthernetMAC> maybe_mac = icmp.SendNDP(IPv6Address(0xfde8'506e'c3a4'0000, 0x0000'0000'0000'0002));
 //    if (maybe_mac) {
 //        std::cout << "MAC: " << *maybe_mac << std::endl;
@@ -370,7 +369,7 @@ int main()
 //    }
 
 
-    //run_tcp_echo_server(1000);
+    run_tcp_echo_server(1000);
     // run_tcp_connection({ IPv4Address::FromString("172.18.0.3").value() }, 1000);
 
     // Give the program time to clean up

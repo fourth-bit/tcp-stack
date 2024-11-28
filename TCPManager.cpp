@@ -10,7 +10,7 @@
 #include "NetworkDevice.h"
 #include "TCPManager.h"
 
-void TCPManager::HandleIncoming(NetworkBuffer buffer, IPv4Connection ip_connection)
+void TCPManager::HandleIncoming(NetworkBuffer buffer, NetworkConnection net_connection)
 {
     using enum TCPHeader::Flags;
 
@@ -32,8 +32,8 @@ void TCPManager::HandleIncoming(NetworkBuffer buffer, IPv4Connection ip_connecti
         return;
     }
 
-    TCPConnection connection {
-        NetworkAddress(ip_connection.connected_ip),
+    TCPConnection tcp_connection {
+        net_connection.source,
         header.source_port,
         header.dest_port,
     };
@@ -42,7 +42,7 @@ void TCPManager::HandleIncoming(NetworkBuffer buffer, IPv4Connection ip_connecti
     DumpPacket(buffer, connection);
 #endif
 
-    auto it = m_open_connections.find(connection);
+    auto it = m_open_connections.find(tcp_connection);
     if (it == m_open_connections.end()) {
         if (!m_listening_ports.contains(header.dest_port)) {
             // Trying to access a port that is not listening
@@ -50,11 +50,11 @@ void TCPManager::HandleIncoming(NetworkBuffer buffer, IPv4Connection ip_connecti
         }
 
         auto socket = m_listening_ports[header.dest_port];
-        socket->HandleIncomingPacket(std::move(buffer), connection);
+        socket->HandleIncomingPacket(std::move(buffer), tcp_connection);
         return;
     }
 
-    it->second->HandleIncomingPacket(std::move(buffer), connection);
+    it->second->HandleIncomingPacket(std::move(buffer), tcp_connection);
 }
 
 void TCPManager::DumpPacket(NetworkBuffer& buffer, const TCPConnection& connection)
@@ -224,5 +224,20 @@ void TCPManager::SendPacket(NetworkBuffer buffer, NetworkAddress address)
         layer->ApplyChecksum(pheader);
 
         m_net_dev->SendIPv4(std::move(buffer), ipv4_address, IPv4Header::TCP);
+    } else if (std::holds_alternative<IPv6Address>(address)) {
+        auto ipv6_address = std::get<IPv6Address>(address);
+
+        IPv6Layer::PsuedoHeader pheader {
+            .source = (NetworkIPv6Address)the_net_dev->GetIPv6Address(),
+            .dest = (NetworkIPv6Address)ipv6_address,
+            .length = layer->GetHeaderSize() + buffer.GetPayload().Size(),
+            .zero1 = 0,
+            .zero2 = 0,
+            .next_header = IPPROTO_TCP,
+        };
+
+        layer->ApplyChecksum(pheader);
+
+        m_net_dev->SendIPv6(std::move(buffer), ipv6_address, IPv6Header::TCP);
     }
 }

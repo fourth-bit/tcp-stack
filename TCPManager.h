@@ -53,7 +53,7 @@ public:
     {
     }
 
-    void HandleIncoming(NetworkBuffer, IPv4Connection);
+    void HandleIncoming(NetworkBuffer, NetworkConnection);
     static void DumpPacket(NetworkBuffer&, const TCPConnection&);
 
     // Called during bind to reserve a port

@@ -57,9 +57,13 @@ Socket* Socket::Create(PROTOCOL proto, SOCK_TYPE type)
             assert(false);
         }
     } else if (proto == PROTOCOL::INTERNET6) {
-        std::cerr << "No Support for IPv6 Yet" << std::endl;
-        assert(false);
-        // config = the_net_dev->GetIPv6Config();
+        config = &the_net_dev->GetIPv6Config();
+
+        // Sanity Check
+        if (!config->HasLayer<LayerType::IPv6>()) {
+            std::cerr << "Fatal: Malformed IPv4 Buffer Config in the_net_dev" << std::endl;
+            assert(false);
+        }
     }
 
     if (config == nullptr) {

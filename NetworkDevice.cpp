@@ -161,6 +161,13 @@ NetworkBuffer IPv4Connection::BuildBufferWith(NetworkBufferConfig& config, size_
 
     return buffer;
 }
+NetworkConnection IPv4Connection::ToNetworkConnection() const
+{
+    return {
+        .source = { connected_ip },
+        .dest = { our_ip },
+    };
+}
 NetworkBuffer IPv6Connection::BuildBufferWith(NetworkBufferConfig& config, size_t payload_size) const
 {
     auto buffer = eth.BuildBufferWith(config, payload_size);
@@ -171,6 +178,13 @@ NetworkBuffer IPv6Connection::BuildBufferWith(NetworkBufferConfig& config, size_
     }
 
     return buffer;
+}
+NetworkConnection IPv6Connection::ToNetworkConnection() const
+{
+    return {
+        .source = { connected_ip },
+        .dest = { our_ip },
+    };
 }
 
 bool IPv4Fragments::AddFragment(NetworkBuffer data)
@@ -735,7 +749,7 @@ void NetworkDevice::ResolveIPv4(NetworkBuffer& buffer, EthernetConnection& eth_c
         udpManager.HandleIncoming(std::move(buffer), connection);
         break;
     case IPv4Header::TCP:
-        tcpManager.HandleIncoming(std::move(buffer), connection);
+        tcpManager.HandleIncoming(std::move(buffer), connection.ToNetworkConnection());
         break;
     default:
         break;
@@ -1103,7 +1117,13 @@ void NetworkDevice::ResolveIPv6(NetworkBuffer& buffer, EthernetConnection& conne
 
     switch (next_header) {
     case IPv6Header::TCP:
+#ifdef DEBUG_TRACE_PACKETS
+        std::cout << "Resolving TCP" << std::endl;
+#endif
+        tcpManager.HandleIncoming(std::move(buffer), ip_connection.ToNetworkConnection());
+        break;
     case IPv6Header::UDP:
+        std::cerr << "Received IPv6 to unsupported UDP" << std::endl;
         break;
     case IPv6Header::ICMPv6:
 #ifdef DEBUG_TRACE_PACKETS
@@ -1121,6 +1141,19 @@ void NetworkDevice::SendIPv6(NetworkBuffer data, IPv6Address target, IPv6Header:
     IPv6Layer* layer = data.GetLayer<LayerType::IPv6>();
     if (!layer) {
         std::cerr << "SendIPv6 Received Malformed Buffer" << std::endl;
+        return;
+    }
+
+    // Same logic as SendIPv4
+    // MakeRoutingDecision can block in this case. This is bad in the listen thread as we cannot block
+    // for any reason, so dispatch the call to another thread
+    if (std::this_thread::get_id() == listen_thread.get_id() && !icmpv6Manager.m_ndp_map.contains(target)) {
+        // This is wasteful and dangerous, as the thread cannot be reliably destroyed before the program
+        // ends. But, this case is incredibly rare (we have a hit on this when we get a packet from an IP
+        // address, but we don't know the MAC address while in the listen thread). The only known case of
+        // this being triggered is the start of an incoming TCP connection. This means it's passable.
+        auto th = std::thread([moved_buffer = std::move(data), target, protocol, this]() mutable { SendIPv6(std::move(moved_buffer), target, protocol); });
+        th.detach();
         return;
     }
 
