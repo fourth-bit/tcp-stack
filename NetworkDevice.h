@@ -43,55 +43,26 @@ struct IPv4Connection {
     NetworkConnection ToNetworkConnection() const;
 };
 
-struct IPv4FragmentID {
+struct PacketFragmentID {
     int id;
-    IPv4Address address;
+    NetworkAddress address;
 
-    bool operator==(const IPv4FragmentID&) const = default;
+    bool operator==(const PacketFragmentID&) const = default;
 };
 
 namespace std {
 template <>
-struct hash<IPv4FragmentID> {
-    size_t operator()(const IPv4FragmentID& id) const
+struct hash<PacketFragmentID> {
+    size_t operator()(const PacketFragmentID& id) const
     {
-        u64 value = id.id;
-        value += (u64)id.address.GetAddress() << 32;
-
-        return hash<u64> {}(value);
+        return hash_combine(std::hash<int> {}(id.id), addr_hash(id.address));
     }
+
+    NetworkAddressHasher addr_hash {};
 };
 }
 
-class IPv4Fragments {
-public:
-    IPv4Fragments(size_t size, std::list<std::pair<std::chrono::steady_clock::time_point, IPv4FragmentID>>::iterator it)
-        : m_it(it)
-    {
-        // Add original hole
-        HoleDescriptor.push_back({
-            0,
-            USHRT_MAX,
-        });
-    }
-    IPv4Fragments(IPv4Fragments&&) = default;
-    IPv4Fragments& operator=(IPv4Fragments&&) = default;
-    ~IPv4Fragments()
-    {
-        if (header) {
-            free(header);
-        }
-    }
-
-    void CopyInHeader(const IPv4Header&);
-    bool AddFragment(NetworkBuffer data);
-
-    auto GetQueueIt() const { return m_it; }
-
-    bool IsFull() const;
-    NetworkBuffer Release();
-
-private:
+class PacketFragments {
     struct Hole {
         u16 fragment_first;
         u16 fragment_last;
@@ -102,12 +73,71 @@ private:
         u16 offset;
     };
 
-    IPv4Header* header { nullptr };
+public:
+    explicit PacketFragments(std::list<std::pair<std::chrono::steady_clock::time_point, PacketFragmentID>>::iterator it)
+        : m_it(it)
+    {
+        // Add original hole
+        HoleDescriptor.push_back({
+            0,
+            USHRT_MAX,
+        });
+    }
+    virtual ~PacketFragments() = default;
+
+    PacketFragments(PacketFragments&&) = default;
+    PacketFragments& operator=(PacketFragments&&) = default;
+    auto GetQueueIt() const { return m_it; }
+    bool AddFragment(NetworkBuffer data, bool is_last_frag, u16);
+    bool IsFull() const;
+    virtual NetworkBuffer Release() = 0;
+
+protected:
     std::list<Hole> HoleDescriptor;
     std::list<Fragment> FragmentList {};
     size_t total_bytes_filled { 0 };
+    std::list<std::pair<std::chrono::steady_clock::time_point, PacketFragmentID>>::iterator m_it;
+};
 
-    std::list<std::pair<std::chrono::steady_clock::time_point, IPv4FragmentID>>::iterator m_it;
+class IPv4Fragments : public PacketFragments {
+public:
+    explicit IPv4Fragments(std::list<std::pair<std::chrono::steady_clock::time_point, PacketFragmentID>>::iterator it)
+        : PacketFragments(it)
+    {
+    }
+
+    ~IPv4Fragments() override
+    {
+        if (header) {
+            free(header);
+        }
+    }
+
+    void CopyInHeader(const IPv4Header&);
+    NetworkBuffer Release() override;
+
+private:
+    IPv4Header* header { nullptr };
+};
+class IPv6Fragments : public PacketFragments {
+public:
+    explicit IPv6Fragments(std::list<std::pair<std::chrono::steady_clock::time_point, PacketFragmentID>>::iterator it)
+        : PacketFragments(it)
+    {
+    }
+    ~IPv6Fragments() override
+    {
+        if (header) {
+            free(header);
+        }
+    }
+
+    void CopyInHeader(const IPv6Header&, size_t);
+    NetworkBuffer Release() override;
+
+private:
+    IPv6Header* header { nullptr };
+    size_t header_length { };
 };
 
 struct IPv6Connection {
@@ -191,9 +221,9 @@ private:
     IPv4Address ip;
     IPv6Address m_ip6;
     IPv4Address m_router;
-    IPv6Address m_router6 { }; // FIXME: Same comment here
+    IPv6Address m_router6 {}; // FIXME: Same comment here
     SubnetMask subnet_mask;
-    SubnetMask6 subnet_mask6 { }; // FIXME: This is just default initializing for now
+    SubnetMask6 subnet_mask6 {}; // FIXME: This is just default initializing for now
     EthernetMAC mac;
 
     NetworkBufferConfig m_arp_buffer_config;
@@ -207,12 +237,12 @@ private:
     // TODO: Make class for IPv4/6
     std::mutex m_fragment_mutex;
     std::condition_variable m_fragment_timeout_cv;
-    std::unordered_map<IPv4FragmentID, IPv4Fragments> m_ip_fragments;
-    std::list<std::pair<std::chrono::steady_clock::time_point, IPv4FragmentID>> fragment_timeout_queue {};
+    std::unordered_map<PacketFragmentID, std::unique_ptr<PacketFragments>> m_ip_fragments;
+    std::list<std::pair<std::chrono::steady_clock::time_point, PacketFragmentID>> fragment_timeout_queue {};
 
     std::thread listen_thread;
 
-    static constexpr std::chrono::milliseconds fragment_timeout_time { 5000 };
+    static constexpr std::chrono::milliseconds fragment_timeout_time { 60000 };
 
     ICMPManager icmpManager;
     ICMPv6Manager icmpv6Manager;

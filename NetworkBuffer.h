@@ -9,6 +9,7 @@
 #include <optional>
 #include <unordered_map>
 #include <variant>
+#include <vector>
 
 #include "Badge.h"
 #include "IPv4Address.h"
@@ -157,6 +158,10 @@ public:
 };
 class IPv6Layer : public NetworkLayer {
 public:
+    enum class IPv6Option : u8 {
+        Fragment = 44,
+    };
+
     struct Config : NetworkLayer::Config {
         IPv6Address src_ip {};
         IPv6Address dest_ip {};
@@ -164,11 +169,13 @@ public:
         u32 flow_label { 0 };
         u8 traffic_class { 0 };
         u8 hop_limit { 255 };
-        u8 protocol { };
+        u8 protocol { 0 };
+
+        std::vector<IPv6Option> options { };
 
         NetworkLayer::Config* Copy() const override;
 
-        size_t LayerSize() override { return sizeof(IPv6Header);}
+        size_t LayerSize() override;
         void ConfigureLayer(NetworkLayer&) override;
     };
 
@@ -197,6 +204,8 @@ public:
     void SetVersion(u32);
     void SetTrafficClass(u32);
     void SetFlowLabel(u32);
+
+    std::optional<VLBufferView> GetOption(IPv6Option);
 };
 class ICMPLayer : public NetworkLayer {
 public:
@@ -338,6 +347,12 @@ struct LayerTypeToClass<LayerType::UDP> {
 
 class NetworkBufferConfig {
 public:
+    NetworkBufferConfig() = default;
+    NetworkBufferConfig(NetworkBufferConfig&) = delete;
+    NetworkBufferConfig(NetworkBufferConfig&&) = default;
+    NetworkBufferConfig& operator=(NetworkBufferConfig&) = delete;
+    NetworkBufferConfig& operator=(NetworkBufferConfig&&) = default;
+
     template <LayerType T>
     void AddLayer(typename LayerTypeToClass<T>::type::Config const& config)
     {

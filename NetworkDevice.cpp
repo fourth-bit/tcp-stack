@@ -21,6 +21,7 @@
 
 #define USE_TUN 0
 #define DEBUG_TRACE_PACKETS
+#undef DEBUG_TRACE_PACKETS
 
 struct make_tun_return {
     int fd;
@@ -187,22 +188,12 @@ NetworkConnection IPv6Connection::ToNetworkConnection() const
     };
 }
 
-bool IPv4Fragments::AddFragment(NetworkBuffer data)
+bool PacketFragments::AddFragment(NetworkBuffer data, bool is_last_frag, u16 offset)
 {
     // From RFC 815
     auto payload = data.GetPayload();
-    auto* ipv4_ptr = data.GetLayer<LayerType::IPv4>();
-    if (!ipv4_ptr) {
-        return false;
-    }
 
-    IPv4Header& data_header = ipv4_ptr->GetHeader();
-    u16 offset = data_header.GetFragmentOffset() * 8;
-    bool last_frag = !(data_header.GetFlags() & IPv4Header::MoreFragments);
-
-    if (offset == 0) {
-        CopyInHeader(data_header);
-    }
+    offset *= 8;
 
     for (auto it = HoleDescriptor.begin(); it != HoleDescriptor.end(); ++it) {
         auto& hole = *it;
@@ -211,7 +202,7 @@ bool IPv4Fragments::AddFragment(NetworkBuffer data)
             continue;
         }
 
-        if (hole.fragment_last > offset + data.Size() && !last_frag) {
+        if (hole.fragment_last > offset + data.Size() && !is_last_frag) {
             HoleDescriptor.insert(it, { (u16)(offset + payload.Size()), hole.fragment_last });
         }
 
@@ -229,7 +220,7 @@ bool IPv4Fragments::AddFragment(NetworkBuffer data)
 
     return false;
 }
-bool IPv4Fragments::IsFull() const
+bool PacketFragments::IsFull() const
 {
     return HoleDescriptor.empty();
 }
@@ -273,6 +264,60 @@ void IPv4Fragments::CopyInHeader(const IPv4Header& other)
         .source_ip = other.source_ip,
         .dest_ip = other.dest_ip,
     };
+}
+void IPv6Fragments::CopyInHeader(const IPv6Header& other_header, size_t length)
+{
+    header = (IPv6Header*)malloc(length - sizeof(IPv6FragmentHeader));
+    memcpy(header, &other_header, length - sizeof(IPv6FragmentHeader));
+    header_length = length - sizeof(IPv6FragmentHeader);
+
+    // Options have the following format:
+    // u8: next header
+    // u8: option header length
+
+    if (header->next_header == 44) {
+        // This is data that wouldn't have been memcpy'd
+        header->next_header = other_header.options[0];
+        return;
+    }
+
+    size_t option_offset = 0;
+
+    int i = 0;
+    while (option_offset < length - sizeof(IPv6Header) - sizeof(IPv6FragmentHeader)) {
+        if (i++ > 100) { // Just for sanity so we don't trap ourselves with a malicious incoming packet
+            break;
+        }
+
+        u8 option_len = header->options[option_offset + 1];
+        if (header->options[option_offset] == 44) { // The next header is the fragment header
+            // This is data that wouldn't have been memcpy'd
+            header->options[option_offset] = other_header.options[option_offset + option_len];
+            break;
+        }
+
+        option_offset += option_len;
+    }
+}
+NetworkBuffer IPv6Fragments::Release()
+{
+    // Same logic as IPv4Fragments, only construct the layers for IP and above
+    auto buffer = NetworkBuffer::WithSize(total_bytes_filled + header_length);
+    auto& ipv6 = buffer.AddLayer<LayerType::IPv6>(header_length);
+
+    IPv6Header* buffer_header = &ipv6.GetHeader();
+    memcpy(buffer_header, header, header_length);
+
+    auto payload = buffer.GetPayload();
+
+    for (auto& fragment : FragmentList) {
+        auto fragment_payload = fragment.fragmentData.GetPayload();
+        memcpy(payload.Data() + fragment.offset, fragment_payload.Data(), fragment_payload.Size());
+    }
+
+    buffer_header->payload_length = total_bytes_filled;
+
+    return buffer;
 }
 
 NetworkDevice::NetworkDevice(EthernetMAC mac_address,
@@ -699,26 +744,35 @@ void NetworkDevice::ResolveIPv4(NetworkBuffer& buffer, EthernetConnection& eth_c
     if (header.IsFragment()) {
         std::scoped_lock lock(m_fragment_mutex);
 
-        auto frag_it = m_ip_fragments.find(IPv4FragmentID { header.id, IPv4Address(header.source_ip) });
+        auto frag_it = m_ip_fragments.find(PacketFragmentID { header.id, { IPv4Address(header.source_ip) } });
 
         if (frag_it == m_ip_fragments.end()) {
-            IPv4FragmentID id { header.id, IPv4Address(header.source_ip) };
+            PacketFragmentID id { header.id, { IPv4Address(header.source_ip) } };
 
             fragment_timeout_queue.emplace_back(std::chrono::steady_clock::now() + fragment_timeout_time, id);
             m_fragment_timeout_cv.notify_one();
-            // FIXME: delete pls
-            //  auto [new_it, inserted] = m_ip_fragments.insert({ id, IPv4Fragments(header.total_length, --fragment_timeout_queue.end()) });
-            auto [new_it, inserted] = m_ip_fragments.emplace(id, IPv4Fragments(header.total_length, --fragment_timeout_queue.end()));
+            auto [new_it, inserted] = m_ip_fragments.emplace(id, std::make_unique<IPv4Fragments>(--fragment_timeout_queue.end()));
             frag_it = new_it;
         }
-        frag_it->second.AddFragment(std::move(buffer));
 
-        if (!frag_it->second.IsFull()) {
+        IPv4Fragments* fragments = nullptr;
+        if (!(fragments = dynamic_cast<IPv4Fragments*>(frag_it->second.get()))) {
+            // The fragments are for IPv6
             return;
         }
 
-        NetworkBuffer new_buffer = frag_it->second.Release();
-        fragment_timeout_queue.erase(frag_it->second.GetQueueIt());
+        fragments->AddFragment(std::move(buffer), !(header.GetFlags() & IPv4Header::MoreFragments), header.GetFragmentOffset());
+
+        if (header.GetFragmentOffset() == 0) {
+            fragments->CopyInHeader(header);
+        }
+
+        if (!fragments->IsFull()) {
+            return;
+        }
+
+        NetworkBuffer new_buffer = fragments->Release();
+        fragment_timeout_queue.erase(fragments->GetQueueIt());
         m_ip_fragments.erase(frag_it);
 
         new_buffer.ResetLayers();
@@ -1027,7 +1081,6 @@ void NetworkDevice::ResolveIPv6(NetworkBuffer& buffer, EthernetConnection& conne
 
     // Is it for us?
     // Two ways, we are the destination, or it matches a multicast for us
-    IPv6Address dest = ipv6.GetDestAddr();
     if (!m_ip6.MatchesMulticast(ipv6.GetDestAddr()) && m_ip6 != ipv6.GetDestAddr()) {
         // Not for us, dropping
         return;
@@ -1065,22 +1118,48 @@ void NetworkDevice::ResolveIPv6(NetworkBuffer& buffer, EthernetConnection& conne
         }
         case IPPROTO_FRAGMENT: {
             auto payload = buffer.GetPayload();
-            struct IPv6FragmentHeader {
-                u8 next_header;
-                u8 reserved;
-                u16 m : 1;
-                u16 res : 2;
-                u16 fragment_offset : 13;
-                u32 identification;
-            } __attribute__((packed));
 
             auto& frag_header = payload.as<IPv6FragmentHeader>();
             next_header = frag_header.next_header;
             current_size += sizeof(frag_header);
-            buffer.ResizeTop(sizeof(frag_header));
+            buffer.ResizeTop(current_size);
 
-            // TODO: Implement
-            break;
+            std::scoped_lock lock (m_fragment_mutex);
+            PacketFragmentID id { (int)frag_header.id, { ipv6.GetSourceAddr() } };
+
+            auto it = m_ip_fragments.find(id);
+            if (it == m_ip_fragments.end()) {
+                fragment_timeout_queue.emplace_back(std::chrono::steady_clock::now() + fragment_timeout_time, id);
+                m_fragment_timeout_cv.notify_one();
+
+                auto [new_it, inserted] = m_ip_fragments.emplace(id, std::make_unique<IPv6Fragments>(--fragment_timeout_queue.end()));
+                it = new_it;
+            }
+
+            IPv6Fragments* fragments = nullptr;
+            if (!(fragments = dynamic_cast<IPv6Fragments*>(it->second.get()))) {
+                // The fragments are for IPv4
+                return;
+            }
+
+            fragments->AddFragment(std::move(buffer), frag_header.GetFlags() != 1, frag_header.GetFragmentOffset());
+
+            if (frag_header.GetFragmentOffset() == 0) {
+                fragments->CopyInHeader(header, current_size);
+            }
+
+            if (!fragments->IsFull()) {
+                return;
+            }
+
+            NetworkBuffer new_buffer = fragments->Release();
+            fragment_timeout_queue.erase(fragments->GetQueueIt());
+            m_ip_fragments.erase(it);
+
+            new_buffer.ResetLayers();
+
+            ResolveIPv6(new_buffer, connection);
+            return;
         }
         case IPPROTO_DSTOPTS: {
             // Routing options for tracking visited nodes
@@ -1098,7 +1177,7 @@ void NetworkDevice::ResolveIPv6(NetworkBuffer& buffer, EthernetConnection& conne
             return;
         case IPPROTO_ENCAP:
         case IPPROTO_AH: // Authentication
-            std::cerr << "Recieved IPv6 Packet with Unsupported Option: " << (u16)next_header << ". Dropping" << std::endl;
+            std::cerr << "Received IPv6 Packet with Unsupported Option: " << (u16)next_header << ". Dropping" << std::endl;
             return;
         default:
             // This means that the protocol is likely not an extension header (it will be caught as unsupported otherwise)
@@ -1163,9 +1242,73 @@ void NetworkDevice::SendIPv6(NetworkBuffer data, IPv6Address target, IPv6Header:
         return;
     }
 
-    layer->SetSourceAddr((NetworkIPv6Address)m_ip6);
-    layer->SetDestAddr((NetworkIPv6Address)maybe_route->dest_addr);
-    layer->SetProtocol(protocol);
+    if (data.Size() > MTU + sizeof(EthernetHeader)) {
+        // Before we get started, the payload is now everything above ip6
+        data.RemoveLayersAbove(layer);
 
-    SendEthernet(std::move(data), maybe_route->dest_mac, ETH_P_IPV6);
+        // Technically we are supposed to split options somewhere here into per-fragment and others
+        // But, we are not really handling options at all, so this distinction is not useful to us
+
+        IPv6Layer::Config cfg {};
+        cfg.src_ip = m_ip6;
+        cfg.dest_ip = maybe_route->dest_addr;
+        cfg.protocol = protocol;
+        cfg.options = { IPv6Layer::IPv6Option::Fragment };
+
+        NetworkBufferConfig frag_cfg = m_default_l1_config.Copy();
+        frag_cfg.AddLayer<LayerType::IPv6>(cfg);
+
+        u16 fragment_offset = 0;
+        u16 frag_size = (MTU - cfg.LayerSize()) / 8;
+        u32 id = rand();
+
+
+        while (data.Size() - fragment_offset > MTU + sizeof(EthernetHeader) - cfg.LayerSize()) {
+            NetworkBuffer frag_buffer = frag_cfg.BuildBuffer(frag_size * 8);
+            auto* frag_ipv6 = frag_buffer.GetLayer<LayerType::IPv6>();
+
+            // We cannot quite configure the fragment header in the layer type
+            auto maybe_option = frag_ipv6->GetOption(IPv6Layer::IPv6Option::Fragment);
+            if (!maybe_option) {
+                // Then we don't have a frag header, this is a fail-case
+                std::cerr << "Failed to make valid fragment header for IPv6" << std::endl;
+                return;
+            }
+
+            auto& frag_header = maybe_option->as<IPv6FragmentHeader>();
+            frag_header.SetFlags(1);
+            frag_header.SetFragmentOffset(fragment_offset / 8);
+            frag_header.id = id;
+
+            memcpy(frag_buffer.GetPayload().Data(), data.GetPayload().Data() + fragment_offset, frag_size * 8);
+
+            SendEthernet(std::move(frag_buffer), maybe_route->dest_mac, ETH_P_IPV6);
+
+            fragment_offset += frag_size * 8;
+        }
+
+        // Calculate final fragment size
+        frag_size = data.GetPayload().Size() - fragment_offset;
+
+        // Exact same code
+        NetworkBuffer frag_buffer = frag_cfg.BuildBuffer(frag_size);
+        auto* frag_ipv6 = frag_buffer.GetLayer<LayerType::IPv6>();
+        auto maybe_option = frag_ipv6->GetOption(IPv6Layer::IPv6Option::Fragment);
+        if (!maybe_option) {
+            std::cerr << "Failed to make valid fragment header for IPv6" << std::endl;
+            return;
+        }
+        auto& frag_header = maybe_option->as<IPv6FragmentHeader>();
+        frag_header.SetFlags(0); // Only difference
+        frag_header.SetFragmentOffset(fragment_offset / 8);
+        frag_header.id = id;
+        memcpy(frag_buffer.GetPayload().Data(), data.GetPayload().Data() + fragment_offset, frag_size);
+        SendEthernet(std::move(frag_buffer), maybe_route->dest_mac, ETH_P_IPV6);
+    } else {
+        layer->SetSourceAddr((NetworkIPv6Address)m_ip6);
+        layer->SetDestAddr((NetworkIPv6Address)maybe_route->dest_addr);
+        layer->SetProtocol(protocol);
+
+        SendEthernet(std::move(data), maybe_route->dest_mac, ETH_P_IPV6);
+    }
 }

@@ -110,6 +110,19 @@ struct IPv6Header {
     u8 hop_limit;
     NetworkIPv6Address source_ip;
     NetworkIPv6Address dest_ip;
+    u8 options[];
+} __attribute__((packed));
+struct IPv6FragmentHeader {
+    u8 next_header;
+    u8 reserved;
+    NetworkOrdered<u16> flags_and_fragment_offset;
+    u32 id;
+
+    u16 GetFlags() const;
+    void SetFlags(u16);
+
+    u16 GetFragmentOffset() const;
+    void SetFragmentOffset(u16);
 } __attribute__((packed));
 
 struct ICMPv4Header {

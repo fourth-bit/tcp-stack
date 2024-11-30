@@ -306,8 +306,35 @@ void IPv6Layer::Config::ConfigureLayer(NetworkLayer& layer)
     ipv6.SetFlowLabel(flow_label);
     ipv6.SetTrafficClass(traffic_class);
     header.hop_limit = hop_limit;
-    header.payload_length = layer.UpperLayerPayload();
+    header.payload_length = layer.UpperLayerPayload() + LayerSize() - sizeof(IPv6Header);
     header.next_header = protocol;
+
+    size_t option_offset = 0;
+    u8* last_next_header = &header.next_header;
+    for (auto option : options) {
+        switch (option) {
+        case IPv6Option::Fragment: {
+            auto* frag_header = reinterpret_cast<IPv6FragmentHeader*>(header.options + option_offset);
+            frag_header->next_header = protocol;
+            frag_header->reserved = 0;
+            *last_next_header = IPPROTO_FRAGMENT;
+            last_next_header = &frag_header->next_header;
+            break;
+        }
+        }
+    }
+}
+size_t IPv6Layer::Config::LayerSize()
+{
+    size_t size = sizeof(IPv6Header);
+    for (auto option : options) {
+        switch (option) {
+        case IPv6Option::Fragment:
+            size += sizeof(IPv6FragmentHeader);
+            break;
+        }
+    }
+    return size;
 }
 NetworkLayer::Config* IPv6Layer::Config::Copy() const
 {
@@ -400,6 +427,35 @@ void IPv6Layer::SetFlowLabel(u32 flow_label)
     bits &= 0xfff0'0000;
     bits |= flow_label;
     header.first_32_bits = bits;
+}
+std::optional<VLBufferView> IPv6Layer::GetOption(IPv6Layer::IPv6Option option)
+{
+    u8 option_header_type = (u8)option;
+
+    // Options have the following format:
+    // u8: next header
+    // u8: option header length
+
+    size_t option_offset = 0;
+    auto& header = GetHeader();
+    u8 next_header = header.next_header;
+
+    int i = 0;
+    while (option_offset < Size() - sizeof(IPv6Header)) {
+        if (i++ > 100) { // Just for sanity so we don't trap ourselves with a malicious incoming packet
+            break;
+        }
+
+        u8 header_length = header.options[option_offset + 1];
+        if (next_header == option_header_type) {
+            return m_view.SubBuffer(sizeof(IPv6Header) + option_offset).ShrinkEnd(header_length);
+        }
+
+        next_header = header.options[option_offset + 0];
+        option_offset += header_length;
+    }
+
+    return {};
 }
 ICMPv6Header& ICMPv6Layer::GetHeader()
 {

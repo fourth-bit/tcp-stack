@@ -25,6 +25,7 @@
 #include "VLBuffer.h"
 
 #define DEBUG_TCP_STATE
+#undef DEBUG_TCP_STATE
 
 class UDPManager;
 class TCPManager;

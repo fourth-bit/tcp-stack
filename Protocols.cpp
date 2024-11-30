@@ -41,6 +41,38 @@ void IPv4Header::SetFragmentOffset(u16 value)
 
     flags_and_fragment_offset = host_ordered;
 }
+u16 IPv6FragmentHeader::GetFlags() const
+{
+    return flags_and_fragment_offset & 1;
+}
+void IPv6FragmentHeader::SetFlags(u16 value)
+{
+    u16 host_ordered = flags_and_fragment_offset;
+
+    // Clear the area
+    host_ordered &= ~1;
+    // Add the new bits in
+    host_ordered += value;
+
+    flags_and_fragment_offset = host_ordered;
+}
+u16 IPv6FragmentHeader::GetFragmentOffset() const
+{
+    return flags_and_fragment_offset >> 3;
+}
+void IPv6FragmentHeader::SetFragmentOffset(u16 value)
+{
+    if (value > 8191) { // 2 ** 13 - 1
+        value &= ~(0b111 << 13);
+    }
+
+    u16 host_ordered = flags_and_fragment_offset;
+
+    host_ordered &= 0b111;
+    host_ordered += value << 3;
+
+    flags_and_fragment_offset = host_ordered;
+}
 
 EthernetBuffer EthernetBuffer::FromVLBuffer(VLBuffer&& buffer)
 {
