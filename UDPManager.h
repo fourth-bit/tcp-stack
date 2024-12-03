@@ -48,7 +48,7 @@ public:
     bool RegisterPort(UDPSocket*, u16 port);
     bool Unregister(UDPSocket*);
 
-    void HandleIncoming(NetworkBuffer, IPv4Connection);
+    void HandleIncoming(NetworkBuffer, NetworkConnection);
     void SendDatagram(NetworkBuffer, NetworkAddress);
 
     const NetworkDevice* Device() const { return m_net_dev; }

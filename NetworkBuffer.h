@@ -258,8 +258,23 @@ public:
 
     u16 RunChecksum();
     void ApplyChecksum();
-    u16 RunChecksum(IPv4Layer::PsuedoHeader);
-    void ApplyChecksum(IPv4Layer::PsuedoHeader);
+    template<typename T>
+    u16 RunChecksum(T pheader)
+    {
+        u32 csum = IPv4ChecksumAdd(&pheader, sizeof(pheader));
+        auto& header = GetHeader();
+        u8* data = m_view.Data();
+        csum = IPv4ChecksumAdd(data, header.length, csum);
+
+        return IPv4ChecksumEnd(csum);
+    }
+    template<typename T>
+    void ApplyChecksum(T pheader)
+    {
+        UDPHeader& header = GetHeader();
+        header.checksum = 0;
+        header.checksum = RunChecksum(pheader);
+    }
 };
 class TCPLayer : public NetworkLayer {
 public:

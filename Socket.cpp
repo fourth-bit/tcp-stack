@@ -294,6 +294,11 @@ bool UDPSocket::ConnectionMatches(NetworkAddress address, u16 port)
 }
 void UDPSocket::AppendReadPayload(VLBufferView view, NetworkAddress in_addr, u16 in_port)
 {
+    if (std::get<2>(m_connected_to) && (in_addr != std::get<0>(m_connected_to) || in_port != std::get<1>(m_connected_to))) {
+        // This socket is listening for a specifc connection, and this is not it
+        return;
+    }
+
     if (is_listening) {
         UDPSockInfo info { in_addr, in_port };
         auto target_socket = m_listening_subsockets.find(info);

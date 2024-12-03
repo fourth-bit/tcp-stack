@@ -537,14 +537,24 @@ void UDPLayer::SetLength(u16 length)
 
 u16 UDPLayer::RunChecksum()
 {
-    // FIXME: make IPv4/6 generic
-    IPv4Layer* ip_layer = m_parent->GetLayer<LayerType::IPv4>();
+    IPv4Layer* ipv4_layer = m_parent->GetLayer<LayerType::IPv4>();
 
-    auto pheader = ip_layer->BuildPsuedoHeader();
-    u32 csum = IPv4ChecksumAdd(&pheader, sizeof(pheader));
-    auto& header = GetHeader();
-    u8* data = m_view.Data();
-    csum = IPv4ChecksumAdd(data, header.length, csum);
+    u32 csum = 0;
+    if (ipv4_layer != nullptr) {
+        auto pheader = ipv4_layer->BuildPsuedoHeader();
+        csum = IPv4ChecksumAdd(&pheader, sizeof(pheader));
+        csum = IPv4ChecksumAdd(m_view.Data(), pheader.length, csum);
+    } else {
+        IPv6Layer* ipv6_layer = m_parent->GetLayer<LayerType::IPv6>();
+        if (ipv6_layer != nullptr) {
+            auto pheader = ipv6_layer->BuildPseudoHeader();
+            csum = IPv4ChecksumAdd(&pheader, sizeof(pheader));
+            csum = IPv4ChecksumAdd(m_view.Data(), pheader.length, csum);
+        } else {
+            // Any behavior other than throwing is fine here
+            std::cerr << "UDP Running Checksum without IPv4 or IPv6 Layers Present" << std::endl;
+        }
+    }
 
     return IPv4ChecksumEnd(csum);
 }
@@ -553,21 +563,6 @@ void UDPLayer::ApplyChecksum()
     UDPHeader& header = GetHeader();
     header.checksum = 0;
     header.checksum = RunChecksum();
-}
-u16 UDPLayer::RunChecksum(IPv4Layer::PsuedoHeader pheader)
-{
-    u32 csum = IPv4ChecksumAdd(&pheader, sizeof(pheader));
-    auto& header = GetHeader();
-    u8* data = m_view.Data();
-    csum = IPv4ChecksumAdd(data, header.length, csum);
-
-    return IPv4ChecksumEnd(csum);
-}
-void UDPLayer::ApplyChecksum(IPv4Layer::PsuedoHeader pheader)
-{
-    UDPHeader& header = GetHeader();
-    header.checksum = 0;
-    header.checksum = RunChecksum(pheader);
 }
 TCPHeader& TCPLayer::GetHeader()
 {
@@ -659,7 +654,6 @@ void TCPLayer::SetWindow(u16 size)
 }
 u16 TCPLayer::RunChecksum()
 {
-    // Fixme: Change (with UDP) to be IPv4/6 Generic
     IPv4Layer* ipv4_layer = m_parent->GetLayer<LayerType::IPv4>();
 
     u32 csum = 0;

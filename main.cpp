@@ -204,6 +204,39 @@ void run_tcp_echo_server(u16 incoming_port)
     sock->Close();
 }
 
+void run_udp_echo_server(u16 port)
+{
+    std::unique_ptr<UDPSocket> socket (dynamic_cast<UDPSocket*>(Socket::Create(PROTOCOL::INTERNET6, SOCK_TYPE::DATAGRAM)));
+    socket->Bind(port);
+
+    for (;;) {
+        auto maybe_read = socket->ReadFrom();
+        if (maybe_read.IsError()) {
+            auto* error = dynamic_cast<SocketError*>(maybe_read.GetError());
+            std::cerr << "Could not read from UDP socket. Code: " << (int)error->code << std::endl;
+            return;
+        }
+
+        auto& info = maybe_read.GetResult();
+
+        if (info.buffer[0] == 'E' && info.buffer[1] == 'N' && info.buffer[2] == 'D') {
+            break;
+        }
+
+        std::cout << info.addr << ": ";
+        for (size_t i = 0; i < info.buffer.Size(); i++) {
+            std::cout << info.buffer[i];
+        }
+        if (info.buffer.Size() && info.buffer[info.buffer.Size() - 1] != '\n') {
+            std::cout << std::endl;
+        } else {
+            std::cout << std::flush;
+        }
+
+        socket->WriteTo(info.buffer.AsView(), info.addr, info.port);
+    }
+}
+
 int main()
 {
 #if 0
@@ -368,8 +401,8 @@ int main()
 //        std::cout << "NDP Failed" << std::endl;
 //    }
 
-
-    run_tcp_echo_server(1000);
+    run_udp_echo_server(1000);
+    // run_tcp_echo_server(1000);
     // run_tcp_connection({ IPv4Address::FromString("172.18.0.3").value() }, 1000);
 
     // Give the program time to clean up

@@ -33,9 +33,8 @@ void UDPBuffer::ApplyUDPHeaderChecksum()
     assert(false);
 }
 
-void UDPManager::HandleIncoming(NetworkBuffer buffer, IPv4Connection connection)
+void UDPManager::HandleIncoming(NetworkBuffer buffer, NetworkConnection connection)
 {
-    // Fixme: Add possibility using either IPv4 or IPv6
     auto& udp = buffer.AddLayer<LayerType::UDP>(sizeof(UDPHeader));
     if (udp.RunChecksum() != 0) {
         std::cout << "Bad Checksum in UDP Packet" << std::endl;
@@ -48,13 +47,11 @@ void UDPManager::HandleIncoming(NetworkBuffer buffer, IPv4Connection connection)
 
     if (socket_it != m_ip4_port_socket_map.end()) {
         UDPSocket* socket = socket_it->second;
-        if (!socket->ConnectionMatches({ connection.connected_ip }, header.source_port)) {
-            return;
-        }
+//        if (!socket->ConnectionMatches({ connection.source }, header.source_port)) {
+//            return;
+//        }
 
-        auto* ipv4 = buffer.GetLayer<LayerType::IPv4>();
-        IPv4Address source_ip(ipv4->GetHeader().source_ip);
-        socket->AppendReadPayload(buffer.GetPayload(), { source_ip }, header.source_port);
+        socket->AppendReadPayload(buffer.GetPayload(), { connection.source }, header.source_port);
     }
 }
 u16 UDPManager::NextEphemeralPort()
@@ -108,5 +105,19 @@ void UDPManager::SendDatagram(NetworkBuffer buf, NetworkAddress address)
         layer->ApplyChecksum(pheader);
 
         m_net_dev->SendIPv4(std::move(buf), ipv4_address, IPv4Header::UDP);
+    } else if (std::holds_alternative<IPv6Address>(address)) {
+        auto ipv6_address = std::get<IPv6Address>(address);
+
+        IPv6Layer::PsuedoHeader pheader {
+            .source = (NetworkIPv6Address)the_net_dev->GetIPv6Address(),
+            .dest = (NetworkIPv6Address)ipv6_address,
+            .length = sizeof(UDPHeader) + buf.GetPayload().Size(),
+            .zero1 = 0,
+            .zero2 = 0,
+            .next_header = IPPROTO_UDP,
+        };
+        layer->ApplyChecksum(pheader);
+
+        m_net_dev->SendIPv6(std::move(buf), ipv6_address, IPv6Header::UDP);
     }
 }

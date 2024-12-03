@@ -800,7 +800,7 @@ void NetworkDevice::ResolveIPv4(NetworkBuffer& buffer, EthernetConnection& eth_c
 #ifdef DEBUG_TRACE_PACKETS
         std::cout << "Resolving UDP" << std::endl;
 #endif
-        udpManager.HandleIncoming(std::move(buffer), connection);
+        udpManager.HandleIncoming(std::move(buffer), connection.ToNetworkConnection());
         break;
     case IPv4Header::TCP:
         tcpManager.HandleIncoming(std::move(buffer), connection.ToNetworkConnection());
@@ -1202,7 +1202,10 @@ void NetworkDevice::ResolveIPv6(NetworkBuffer& buffer, EthernetConnection& conne
         tcpManager.HandleIncoming(std::move(buffer), ip_connection.ToNetworkConnection());
         break;
     case IPv6Header::UDP:
-        std::cerr << "Received IPv6 to unsupported UDP" << std::endl;
+#ifdef DEBUG_TRACE_PACKETS
+        std::cout << "Resolving UDP" << std::endl;
+#endif
+        udpManager.HandleIncoming(std::move(buffer), ip_connection.ToNetworkConnection());
         break;
     case IPv6Header::ICMPv6:
 #ifdef DEBUG_TRACE_PACKETS
