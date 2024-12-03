@@ -4,7 +4,7 @@ The main purpose of this project is to explore and
 implement the inner workings of the internet on our
 computers. The goal is to have a complete stack working up
 to TCP over both IPv4 and IPv6. I run this in a simple
-Ubuntu 22.04 docker container with only the essentials for
+Ubuntu 24.04 docker container with only the essentials for
 c++ development installed (found in Dockerfile-cppbase),
 and the rest of the packages listed in the other Dockerfile.
 I do not recommend running this elsewhere as it will stop
